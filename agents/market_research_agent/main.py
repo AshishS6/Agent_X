@@ -253,6 +253,21 @@ When generating the final response:
         """
         Agent loop for market research tasks
         """
+        # Customize prompt based on action
+        if hasattr(task, 'action') and task.action == 'web_crawler':
+            # Extract URL and keywords from the task input
+            # Frontend maps 'topic' to URL and 'filters.industry' to Keywords
+            # TaskInput model uses 'input_data', not 'input'
+            inputs = task.input_data if hasattr(task, 'input_data') else {}
+            url = inputs.get('topic', '')
+            filters = inputs.get('filters', {})
+            keywords = filters.get('industry', '')
+            
+            user_prompt = (
+                f"Please use the `monitor_url` tool to crawl the following URL: {url}. "
+                f"Check for these keywords: {keywords}. "
+                f"Provide a detailed summary of the content and list any keyword matches found."
+            )
         # We can add custom logic here if needed, but the base ReAct loop 
         # (which calls LLM -> Tools -> LLM) should handle most cases if we use LangChain's agent.
         # However, the base_agent.py implementation seems to be a simple LLM call 

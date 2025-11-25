@@ -261,22 +261,40 @@ const MarketResearchAgent = () => {
                                     <option value="competitor_research">Competitor Research</option>
                                     <option value="trend_monitoring">Trend Monitoring</option>
                                     <option value="compliance_check">Compliance Check</option>
+                                    <option value="web_crawler">Web Crawler</option>
                                 </select>
                             </div>
 
                             <div>
                                 <label className="block text-sm font-medium text-gray-400 mb-1">
-                                    {researchType === 'competitor_research' ? 'Competitor Name' : 'Topic / Keywords'}
+                                    {researchType === 'competitor_research' ? 'Competitor Name' :
+                                        researchType === 'web_crawler' ? 'Target URL' : 'Topic / Keywords'}
                                 </label>
                                 <input
                                     type="text"
                                     value={topic}
                                     onChange={(e) => setTopic(e.target.value)}
-                                    placeholder={researchType === 'competitor_research' ? 'e.g. Acme Corp' : 'e.g. AI in Healthcare'}
+                                    placeholder={
+                                        researchType === 'competitor_research' ? 'e.g. Acme Corp' :
+                                            researchType === 'web_crawler' ? 'https://example.com' : 'e.g. AI in Healthcare'
+                                    }
                                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                                     required
                                 />
                             </div>
+
+                            {researchType === 'web_crawler' && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-400 mb-1">Keywords to Track</label>
+                                    <input
+                                        type="text"
+                                        value={filters.industry} // Reusing industry field for keywords to avoid breaking interface
+                                        onChange={(e) => setFilters({ ...filters, industry: e.target.value })}
+                                        placeholder="e.g. pricing, launch, error"
+                                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                    />
+                                </div>
+                            )}
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>

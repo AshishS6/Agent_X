@@ -19,8 +19,14 @@ from shared.db_utils import update_task_status, save_conversation_message, get_a
 from main import create_market_research_agent
 
 # Load environment variables
+# Load environment variables
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'backend', '.env')
 load_dotenv(env_path)
+
+# Load local agent env if exists (overrides backend)
+local_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+if os.path.exists(local_env_path):
+    load_dotenv(local_env_path, override=True)
 
 # Configure logging
 logging.basicConfig(
