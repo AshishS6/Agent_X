@@ -115,9 +115,12 @@ export const AgentService = {
 };
 
 export const TaskService = {
-    getAll: async (params?: { agentId?: string; status?: string; limit?: number }): Promise<Task[]> => {
-        const response = await api.get<{ data: any[] }>('/tasks', { params });
-        return response.data.data.map(mapTaskFromApi);
+    getAll: async (params?: { agentId?: string; status?: string; limit?: number; offset?: number }): Promise<{ tasks: Task[], total: number }> => {
+        const response = await api.get<{ data: any[], total: number }>('/tasks', { params });
+        return {
+            tasks: response.data.data.map(mapTaskFromApi),
+            total: response.data.total
+        };
     },
 
     getById: async (id: string): Promise<Task> => {

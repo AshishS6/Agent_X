@@ -17,8 +17,8 @@ router.get('/', async (req: Request, res: Response<ApiResponse>) => {
             offset: req.query.offset ? parseInt(req.query.offset as string, 10) : 0,
         };
 
-        const tasks = await TaskModel.findAll(filters);
-        res.json({ success: true, data: tasks });
+        const { tasks, total } = await TaskModel.findAll(filters);
+        res.json({ success: true, data: tasks, total });
     } catch (error: any) {
         console.error('Error fetching tasks:', error);
         res.status(500).json({ success: false, error: error.message });

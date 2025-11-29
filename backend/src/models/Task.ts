@@ -12,21 +12,28 @@ export class TaskModel {
         userId?: string;
         limit?: number;
         offset?: number;
-    }): Promise<Task[]> {
+    }): Promise<{ tasks: Task[], total: number }> {
         let query = 'SELECT * FROM tasks WHERE 1=1';
+        let countQuery = 'SELECT COUNT(*)::int as total FROM tasks WHERE 1=1';
         const params: any[] = [];
         let paramCount = 1;
 
         if (filters?.agentId) {
-            query += ` AND agent_id = $${paramCount++}`;
+            const clause = ` AND agent_id = $${paramCount++}`;
+            query += clause;
+            countQuery += clause;
             params.push(filters.agentId);
         }
         if (filters?.status) {
-            query += ` AND status = $${paramCount++}`;
+            const clause = ` AND status = $${paramCount++}`;
+            query += clause;
+            countQuery += clause;
             params.push(filters.status);
         }
         if (filters?.userId) {
-            query += ` AND user_id = $${paramCount++}`;
+            const clause = ` AND user_id = $${paramCount++}`;
+            query += clause;
+            countQuery += clause;
             params.push(filters.userId);
         }
 
@@ -41,8 +48,19 @@ export class TaskModel {
             params.push(filters.offset);
         }
 
-        const result = await db.query(query, params);
-        return result.rows;
+        // Execute both queries
+        // Note: For count query, we only need the filter params, not limit/offset
+        const filterParams = params.slice(0, paramCount - 1 - (filters?.limit ? 1 : 0) - (filters?.offset ? 1 : 0));
+
+        const [result, countResult] = await Promise.all([
+            db.query(query, params),
+            db.query(countQuery, filterParams)
+        ]);
+
+        return {
+            tasks: result.rows,
+            total: countResult.rows[0].total
+        };
     }
 
     /**

@@ -30,209 +30,1027 @@ class MarketResearchAgent(BaseAgent):
     
     def _register_tools(self):
         """Register market research-specific tools"""
-        
-        @tool
-        def search_web(query: str, max_results: int = 5) -> str:
-            """
-            Search the web for information using DuckDuckGo (Free).
+        try:
+            self.logger.info("Registering market research tools...")
             
-            Args:
-                query: Search query
-                max_results: Number of results to return (default: 5)
-            
-            Returns:
-                Search results with titles, snippets, and links
-            """
-            try:
-                results = []
-                with DDGS() as ddgs:
-                    # Use text search
-                    search_results = list(ddgs.text(query, max_results=max_results))
+            @tool
+            def search_web(query: str, max_results: int = 5) -> str:
+                """
+                Search the web for information using DuckDuckGo (Free).
+                
+                Args:
+                    query: Search query
+                    max_results: Number of results to return (default: 5)
+                
+                Returns:
+                    Search results with titles, snippets, and links
+                """
+                try:
+                    results = []
+                    with DDGS() as ddgs:
+                        # Use text search
+                        search_results = list(ddgs.text(query, max_results=max_results))
+                        
+                        for i, r in enumerate(search_results):
+                            results.append(f"{i+1}. {r['title']}\n   Source: {r['href']}\n   Snippet: {r['body']}\n")
                     
-                    for i, r in enumerate(search_results):
-                        results.append(f"{i+1}. {r['title']}\n   Source: {r['href']}\n   Snippet: {r['body']}\n")
-                
-                if not results:
-                    return f"No results found for query: {query}"
-                
-                return "\n".join(results)
-            except Exception as e:
-                return f"Error performing search: {str(e)}"
+                    if not results:
+                        return f"No results found for query: {query}"
+                    
+                    return "\n".join(results)
+                except Exception as e:
+                    return f"Error performing search: {str(e)}"
 
-        @tool
-        def monitor_url(url: str, keywords: str = "") -> str:
-            """
-            Crawl a specific URL and extract text content.
+            # Add logging to monitor_url
+            # We need to inject logging into the inner function or wrap it
+            # Since we are inside _register_tools, we can use self.logger
             
-            Args:
-                url: URL to monitor/crawl
-                keywords: Comma-separated keywords to look for (optional)
-            
-            Returns:
-                Extracted text content and keyword matches
-            """
-            try:
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
-                response = requests.get(url, headers=headers, timeout=10)
-                response.raise_for_status()
+            # Let's redefine monitor_url with logging
+            @tool
+            def monitor_url(url: str, keywords: str = "", max_pages: int = 0, depth: int = 1, respect_robots_txt: bool = True, delay: float = 1.0) -> str:
+                """
+                Crawl a URL with advanced options.
                 
-                soup = BeautifulSoup(response.content, 'html.parser')
+                CRITICAL: You must return the raw JSON string output from this tool EXACTLY as is. 
+                DO NOT summarize. DO NOT reformat. DO NOT wrap in markdown.
+                Just return the JSON string.
                 
-                # Remove script and style elements
-                for script in soup(["script", "style"]):
-                    script.decompose()
+                Args:
+                    url: Base URL to monitor
+                    keywords: Comma-separated keywords
+                    max_pages: Max pages (0 for unlimited)
+                    depth: Crawl depth
+                    respect_robots_txt: Respect robots.txt
+                    delay: Request delay
                 
-                # Get text
-                text = soup.get_text()
-                
-                # Clean text (remove extra whitespace)
-                lines = (line.strip() for line in text.splitlines())
-                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-                clean_text = '\n'.join(chunk for chunk in chunks if chunk)
-                
-                # Check for keywords if provided
-                keyword_matches = []
-                if keywords:
-                    keyword_list = [k.strip().lower() for k in keywords.split(',')]
-                    text_lower = clean_text.lower()
-                    for k in keyword_list:
-                        if k in text_lower:
-                            keyword_matches.append(k)
-                
-                summary = clean_text[:1000] + "..." if len(clean_text) > 1000 else clean_text
-                
-                result = f"Crawled {url}\n\nStatus: Success\nContent Length: {len(clean_text)} chars\n"
-                if keywords:
-                    result += f"Keywords Found: {', '.join(keyword_matches) if keyword_matches else 'None'}\n"
-                result += f"\nContent Summary:\n{summary}"
-                
-                return result
-                
-            except Exception as e:
-                return f"Error crawling URL {url}: {str(e)}"
+                Returns:
+                    str: Raw JSON report
+                """
+                self.logger.info(f"Starting crawl for URL: {url} (Depth: {depth}, Max: {max_pages})")
+                try:
+                    import time
+                    from urllib.parse import urljoin, urlparse
+                    from urllib.robotparser import RobotFileParser
+                    import re
+                    
+                    headers = {
+                        'User-Agent': 'Agent_X_MarketResearchBot/1.0'
+                    }
+                    
+                    # 1. Check robots.txt
+                    if respect_robots_txt:
+                        parsed_url = urlparse(url)
+                        robots_url = f"{parsed_url.scheme}://{parsed_url.netloc}/robots.txt"
+                        rp = RobotFileParser()
+                        try:
+                            self.logger.info(f"Checking robots.txt at {robots_url}")
+                            rp.set_url(robots_url)
+                            rp.read()
+                            if not rp.can_fetch(headers['User-Agent'], url):
+                                return json.dumps({
+                                    "error": "Crawling forbidden by robots.txt",
+                                    "url": url
+                                }, indent=2)
+                        except Exception as e:
+                            self.logger.warning(f"Could not check robots.txt: {e}. Proceeding with caution.")
 
-        @tool
-        def analyze_competitor(company_name: str) -> str:
-            """
-            Analyze a competitor by searching for key information.
-            
-            Args:
-                company_name: Name of the competitor
-            
-            Returns:
-                Competitor intelligence summary
-            """
-            # Use the search tool logic internally
-            try:
-                queries = [
-                    f"{company_name} company overview products",
-                    f"{company_name} pricing model",
-                    f"{company_name} recent news 2024",
-                    f"{company_name} competitors"
-                ]
-                
-                combined_results = []
-                with DDGS() as ddgs:
-                    for q in queries:
-                        results = list(ddgs.text(q, max_results=2))
-                        for r in results:
-                            combined_results.append(f"- {r['title']}: {r['body']} ({r['href']})")
-                
-                return f"Raw Research Data for {company_name}:\n\n" + "\n".join(combined_results)
-            except Exception as e:
-                return f"Error analyzing competitor: {str(e)}"
+                    # Helper to crawl a single page
+                    def crawl_page(page_url):
+                        try:
+                            self.logger.info(f"Crawling page: {page_url}")
+                            time.sleep(delay) # Polite delay
+                            resp = requests.get(page_url, headers=headers, timeout=10)
+                            if resp.status_code != 200: 
+                                self.logger.warning(f"Failed to fetch {page_url}: Status {resp.status_code}")
+                                return None
+                            
+                            soup = BeautifulSoup(resp.content, 'html.parser')
+                            
+                            # Clean
+                            for element in soup(["script", "style", "nav", "footer", "header", "aside", "noscript", "iframe", "svg"]):
+                                element.decompose()
+                                
+                            text = soup.get_text(separator='\n', strip=True)
+                            lines = (line.strip() for line in text.splitlines())
+                            clean_text = '\n'.join(line for line in lines if line)
+                            
+                            # Find keywords WITH CONTEXT
+                            keyword_matches = []  # List of {keyword, context, position}
+                            if keywords:
+                                keyword_list = [k.strip().lower() for k in keywords.split(',')]
+                                
+                                # Split text into sentences for context extraction
+                                import re
+                                sentences = re.split(r'(?<=[.!?])\s+', clean_text)
+                                
+                                for i, sentence in enumerate(sentences):
+                                    sentence_lower = sentence.lower()
+                                    for keyword in keyword_list:
+                                        if keyword in sentence_lower:
+                                            # Get context: current sentence + prev/next if available
+                                            context_sentences = []
+                                            if i > 0:
+                                                context_sentences.append(sentences[i-1])
+                                            context_sentences.append(sentence)
+                                            if i < len(sentences) - 1:
+                                                context_sentences.append(sentences[i+1])
+                                            
+                                            context = ' '.join(context_sentences)
+                                            
+                                            # Highlight the keyword in context (for JSON, we'll use **bold**)
+                                            highlighted_context = re.sub(
+                                                f'({re.escape(keyword)})',
+                                                r'**\1**',
+                                                context,
+                                                flags=re.IGNORECASE
+                                            )
+                                            
+                                            keyword_matches.append({
+                                                'keyword': keyword,
+                                                'context': highlighted_context,
+                                                'sentence_index': i
+                                            })
+                            
+                            # Extract links for recursion
+                            links = []
+                            for a_tag in soup.find_all('a', href=True):
+                                href = a_tag['href']
+                                full_url = urljoin(page_url, href)
+                                # Only follow internal links or same domain
+                                if urlparse(full_url).netloc == urlparse(url).netloc:
+                                    links.append(full_url)
 
-        @tool
-        def track_trends(topic: str) -> str:
-            """
-            Track trends for a specific topic.
-            
-            Args:
-                topic: Topic to track
-            
-            Returns:
-                Trend analysis data
-            """
-            try:
-                queries = [
-                    f"{topic} trends 2024 2025",
-                    f"future of {topic}",
-                    f"{topic} market growth statistics"
-                ]
-                
-                combined_results = []
-                with DDGS() as ddgs:
-                    for q in queries:
-                        results = list(ddgs.text(q, max_results=3))
-                        for r in results:
-                            combined_results.append(f"- {r['title']}: {r['body']} ({r['href']})")
-                
-                return f"Trend Research Data for {topic}:\n\n" + "\n".join(combined_results)
-            except Exception as e:
-                return f"Error tracking trends: {str(e)}"
+                            return {
+                                "url": page_url,
+                                "title": soup.title.string if soup.title else "No Title",
+                                "text": clean_text,
+                                "keyword_matches": keyword_matches,  # NEW: Detailed matches
+                                "links": links,
+                                "length": len(clean_text)
+                            }
+                        except Exception as e:
+                            self.logger.error(f"Error crawling page {page_url}: {e}")
+                            return None
 
-        @tool
-        def compliance_check(topic: str, industry: str = "general") -> str:
-            """
-            Check for compliance and regulatory updates.
-            
-            Args:
-                topic: Specific compliance topic
-                industry: Industry sector
-            
-            Returns:
-                Regulatory information
-            """
-            try:
-                queries = [
-                    f"{topic} regulations {industry} 2024",
-                    f"{topic} compliance requirements",
-                    f"{topic} legal risks {industry}"
-                ]
-                
-                combined_results = []
-                with DDGS() as ddgs:
-                    for q in queries:
-                        results = list(ddgs.text(q, max_results=3))
-                        for r in results:
-                            combined_results.append(f"- {r['title']}: {r['body']} ({r['href']})")
-                
-                return f"Compliance Research Data for {topic} ({industry}):\n\n" + "\n".join(combined_results)
-            except Exception as e:
-                return f"Error checking compliance: {str(e)}"
+                    # BFS Crawl
+                    visited = set()
+                    queue = [(url, 1)] # (url, current_depth)
+                    results = []
+                    
+                    # If max_pages is 0 or negative, treat as unlimited (bounded by depth)
+                    while queue and (max_pages <= 0 or len(results) < max_pages):
+                        current_url, current_depth = queue.pop(0)
+                        
+                        if current_url in visited:
+                            continue
+                        
+                        visited.add(current_url)
+                        
+                        # Check robots.txt for this specific URL if needed (simplified here to just base check above for now, 
+                        # but ideally should check every URL if strict)
+                        
+                        page_data = crawl_page(current_url)
+                        if page_data:
+                            # Add to results (exclude links to keep JSON smaller)
+                            result_entry = {k: v for k, v in page_data.items() if k != 'links'}
+                            results.append(result_entry)
+                            
+                            # Add children to queue if depth allows
+                            if current_depth < depth:
+                                for link in page_data['links']:
+                                    if link not in visited:
+                                        queue.append((link, current_depth + 1))
+                    
+                    # Aggregate Report
+                    total_keyword_matches = sum(len(r.get('keyword_matches', [])) for r in results)
+                    
+                    report = {
+                        "base_url": url,
+                        "pages_crawled": len(results),
+                        "total_keyword_matches": total_keyword_matches,
+                        "pages": []
+                    }
+                    
+                    for res in results:
+                        keyword_matches_data = res.get('keyword_matches', [])
+                        
+                        page_summary = {
+                            "url": res['url'],
+                            "title": res['title'],
+                            "keyword_matches": keyword_matches_data,  # NEW: Full match details
+                            "content_snippet": res['text'][:500] + "..." if len(res['text']) > 500 else res['text']
+                        }
+                        report["pages"].append(page_summary)
 
-        @tool
-        def generate_report(research_data: str, report_type: str = "summary") -> str:
-            """
-            Generate a structured research report.
-            
-            Args:
-                research_data: Summary of research findings
-                report_type: Type of report
-            
-            Returns:
-                Formatted report confirmation
-            """
-            # In a real system, this might generate a PDF or save to a DB
-            return f"Report generated successfully.\nType: {report_type}\nLength: {len(research_data)} chars\n\n(This content would be formatted into a PDF/Doc in production)"
+                    return json.dumps(report, indent=2)
 
-        # Register all tools
-        self.add_tool(search_web)
-        self.add_tool(monitor_url)
-        self.add_tool(analyze_competitor)
-        self.add_tool(track_trends)
-        self.add_tool(compliance_check)
-        self.add_tool(generate_report)
+                except Exception as e:
+                    self.logger.error(f"Error crawling URL {url}: {str(e)}")
+                    return json.dumps({"error": str(e)})
+
+            @tool
+            def comprehensive_site_scan(url: str, business_name: str = "") -> str:
+                """
+                Comprehensive website compliance and risk assessment scan.
+                
+                CRITICAL: You must return the raw JSON string output from this tool EXACTLY as is. 
+                DO NOT summarize. DO NOT reformat. DO NOT wrap in markdown.
+                Just return the JSON string.
+                
+                Args:
+                    url: Website URL to scan
+                    business_name: Business/Billing name (optional)
+                
+                Returns:
+                    str: Raw JSON report with compliance, policy, MCC, and risk analysis
+                """
+                try:
+                    import whois
+                    import ssl
+                    import socket
+                    from datetime import datetime
+                    from urllib.parse import urlparse, urljoin
+                    import re
+                    import time
+                    
+                    # Clean URL input (handle cases where LLM passes "url: https://..." or other garbage)
+                    cleaned_url = url.strip()
+                    # Remove "url:" prefix if present (case insensitive)
+                    if re.match(r'^url:\s*', cleaned_url, re.IGNORECASE):
+                        cleaned_url = re.sub(r'^url:\s*', '', cleaned_url, flags=re.IGNORECASE)
+                    
+                    # If the URL string contains other arguments like ", business_name:", split and take the first part
+                    if ',' in cleaned_url and ('http://' in cleaned_url or 'https://' in cleaned_url):
+                        # Simple heuristic: assume URL is the first part before a comma
+                        cleaned_url = cleaned_url.split(',')[0].strip()
+                        
+                    # Ensure scheme
+                    if not cleaned_url.startswith(('http://', 'https://')):
+                        cleaned_url = 'https://' + cleaned_url
+                        
+                    url = cleaned_url
+                    self.logger.info(f"Starting comprehensive scan for: {url}")
+                    
+                    # Initialize report structure
+                    report = {
+                        "url": url,
+                        "business_name": business_name,
+                        "scan_timestamp": datetime.now().isoformat(),
+                        "compliance_checks": {},
+                        "policy_details": {},
+                        "mcc_codes": {},
+                        "product_details": {},
+                        "business_details": {}
+                    }
+                    
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc or parsed_url.path
+                    
+                    # ===========================================
+                    # 1. COMPLIANCE CHECKS
+                    # ===========================================
+                    
+                    compliance = {
+                        "liveness": {"status": "unknown", "message": ""},
+                        "redirection": {"status": "unknown", "redirects": [], "message": ""},
+                        "vintage": {"status": "unknown", "age_days": 0, "message": ""},
+                        "url_details": {},
+                        "ssl_certificate": {}
+                    }
+                    
+                    # Check Liveness
+                    try:
+                        headers = {'User-Agent': 'Agent_X_ComplianceScanner/1.0'}
+                        response = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+                        
+                        if response.status_code == 200:
+                            compliance["liveness"] = {
+                                "status": "pass",
+                                "message": "The website is live and fully operational."
+                            }
+                        else:
+                            compliance["liveness"] = {
+                                "status": "fail",
+                                "message": f"Website returned status code {response.status_code}"
+                            }
+                        
+                        # Check Redirections
+                        if len(response.history) > 0:
+                            redirects = [{"from": r.url, "to": r.headers.get('Location', ''), "status": r.status_code} 
+                                       for r in response.history]
+                            compliance["redirection"] = {
+                                "status": "warning" if len(redirects) > 1 else "info",
+                                "redirects": redirects,
+                                "message": f"{len(redirects)} redirect(s) detected." if len(redirects) > 0 else "No redirection is detected."
+                            }
+                        else:
+                            compliance["redirection"] = {
+                                "status": "pass",
+                                "redirects": [],
+                                "message": "No redirection is detected."
+                            }
+                        
+                        final_url = response.url
+                        
+                    except Exception as e:
+                        compliance["liveness"] = {
+                            "status": "fail",
+                            "message": f"Failed to connect: {str(e)}"
+                        }
+                        final_url = url
+                    
+                    # Check Domain Age (Vintage)
+                    try:
+                        self.logger.info(f"Checking WHOIS for domain: {domain}")
+                        w = whois.whois(domain)
+                        
+                        domain_provider = w.get('registrar', 'Unknown')
+                        creation_date = w.get('creation_date')
+                        expiration_date = w.get('expiration_date')
+                        
+                        # Handle list or single date
+                        if isinstance(creation_date, list):
+                            creation_date = creation_date[0]
+                        if isinstance(expiration_date, list):
+                            expiration_date = expiration_date[0]
+                        
+                        age_days = 0
+                        if creation_date:
+                            # Handle timezone awareness
+                            if creation_date.tzinfo:
+                                now = datetime.now(creation_date.tzinfo)
+                            else:
+                                now = datetime.now()
+                            
+                            age_days = (now - creation_date).days
+                            
+                            if age_days < 365:
+                                compliance["vintage"] = {
+                                    "status": "warning",
+                                    "age_days": age_days,
+                                    "message": "The Age of the website is less than 1 year."
+                                }
+                            else:
+                                compliance["vintage"] = {
+                                    "status": "pass",
+                                    "age_days": age_days,
+                                    "message": f"Domain is {age_days} days old."
+                                }
+                        
+                        compliance["url_details"] = {
+                            "link": url,
+                            "redirected_link": final_url,
+                            "domain_provider": domain_provider,
+                            "domain_registered_on": creation_date.strftime("%Y-%m-%d") if creation_date else "Unknown",
+                            "domain_expires_on": expiration_date.strftime("%Y-%m-%d") if expiration_date else "Unknown",
+                            "vintage_days": age_days
+                        }
+                        
+                    except Exception as e:
+                        self.logger.warning(f"WHOIS lookup failed: {e}")
+                        compliance["vintage"] = {
+                            "status": "unknown",
+                            "age_days": 0,
+                            "message": "Unable to determine domain age."
+                        }
+                        compliance["url_details"] = {
+                            "link": url,
+                            "redirected_link": final_url,
+                            "domain_provider": "Unknown",
+                            "domain_registered_on": "Unknown",
+                            "domain_expires_on": "Unknown",
+                            "vintage_days": 0
+                        }
+                    
+                    # Check SSL Certificate
+                    try:
+                        if parsed_url.scheme == 'https':
+                            context = ssl.create_default_context()
+                            with socket.create_connection((domain, 443), timeout=5) as sock:
+                                with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                                    cert = ssock.getpeercert()
+                                    
+                                    compliance["ssl_certificate"] = {
+                                        "valid": True,
+                                        "server_hostname": domain,
+                                        "dns_names": cert.get('subjectAltName', [])
+                                    }
+                        else:
+                            compliance["ssl_certificate"] = {
+                                "valid": False,
+                                "message": "Website does not use HTTPS"
+                            }
+                    except Exception as e:
+                        compliance["ssl_certificate"] = {
+                            "valid": False,
+                            "error": str(e)
+                        }
+                    
+                    report["compliance_checks"] = compliance
+                    
+                    # ===========================================
+                    # 2. CRAWL WEBSITE FOR POLICY & CONTENT
+                    # ===========================================
+                    
+                    try:
+                        time.sleep(0.5)
+                        resp = requests.get(final_url, headers=headers, timeout=10)
+                        soup = BeautifulSoup(resp.content, 'html.parser')
+                        
+                        # Find all links
+                        all_links = []
+                        for a in soup.find_all('a', href=True):
+                            href = a['href']
+                            full_url = urljoin(final_url, href)
+                            link_text = a.get_text(strip=True).lower()
+                            all_links.append({"url": full_url, "text": link_text})
+                        
+                        # ===========================================
+                        # 3. POLICY PAGE DETECTION
+                        # ===========================================
+                        
+                        policy_pages = {
+                            "home_page": {"found": False, "url": final_url, "status": ""},
+                            "privacy_policy": {"found": False, "url": "", "status": ""},
+                            "shipping_delivery": {"found": False, "url": "", "status": ""},
+                            "returns_refund": {"found": False, "url": "", "status": ""},
+                            "terms_condition": {"found": False, "url": "", "status": ""},
+                            "contact_us": {"found": False, "url": "", "status": ""},
+                            "about_us": {"found": False, "url": "", "status": ""},
+                            "faq": {"found": False, "url": "", "status": ""},
+                            "product": {"found": False, "url": "", "status": ""}
+                        }
+                        
+                        # Home page is available by default
+                        policy_pages["home_page"] = {
+                            "found": True,
+                            "url": final_url,
+                            "status": "Home Page page is available"
+                        }
+                        
+                        # Policy page patterns
+                        patterns = {
+                            "privacy_policy": [
+                                r'privacy[-_]?policy', r'privacy', r'gdpr', r'data[-_]?protection'
+                            ],
+                            "terms_condition": [
+                                r'terms?[-_]?(and[-_]?|&[-_]?)?conditions?', r'terms?[-_]?of[-_]?(service|use)', r't&c', r'tos'
+                            ],
+                            "shipping_delivery": [
+                                r'shipping', r'delivery', r'dispatch'
+                            ],
+                            "returns_refund": [
+                                r'returns?', r'refunds?', r'cancellation'
+                            ],
+                            "contact_us": [
+                                r'contact[-_]?us', r'contact', r'support'
+                            ],
+                            "about_us": [
+                                r'about[-_]?us', r'about', r'who[-_]?we[-_]?are'
+                            ],
+                            "faq": [
+                                r'faq', r'frequently[-_]?asked', r'help'
+                            ],
+                            "product": [
+                                r'products?', r'shop', r'store', r'catalog'
+                            ]
+                        }
+                        
+                        for link_data in all_links:
+                            link_url = link_data["url"]
+                            link_text = link_data["text"]
+                            link_path = urlparse(link_url).path.lower()
+                            
+                            for page_type, page_patterns in patterns.items():
+                                if not policy_pages[page_type]["found"]:
+                                    for pattern in page_patterns:
+                                        if re.search(pattern, link_text) or re.search(pattern, link_path):
+                                            policy_pages[page_type] = {
+                                                "found": True,
+                                                "url": link_url,
+                                                "status": f"{page_type.replace('_', ' ').title()} page is available"
+                                            }
+                                            break
+                        
+                        report["policy_details"] = policy_pages
+                        
+                        # ===========================================
+                        # 4. BUSINESS NAME EXTRACTION
+                        # ===========================================
+                        
+                        if not business_name:
+                            # Try to extract from footer, about, or copyright
+                            footer = soup.find('footer')
+                            if footer:
+                                copyright = footer.find(text=re.compile(r'©|\(c\)|copyright', re.I))
+                                if copyright:
+                                    # Extract company name from copyright text
+                                    match = re.search(r'(?:©|\(c\)|copyright)\s*(?:\\d{4})?\s*([A-Z][\\w\\s&,.-]+)', copyright, re.I)
+                                    if match:
+                                        business_name = match.group(1).strip()
+                        
+                        report["business_details"]["extracted_business_name"] = business_name
+                        
+                        # ===========================================
+                        # 5. CONTENT RISK DETECTION
+                        # ===========================================
+                        
+                        page_text = soup.get_text(separator=' ', strip=True).lower()
+                        
+                        #  Lorem ipsum detection
+                        lorem_ipsum_patterns = [
+                            r'lorem\s+ipsum\s+dolor\s+sit\s+amet',
+                            r'consectetur\s+adipiscing',
+                            r'sed\s+do\s+eiusmod'
+                        ]
+                        
+                        dummy_words_found = []
+                        for pattern in lorem_ipsum_patterns:
+                            if re.search(pattern, page_text):
+                                dummy_words_found.append(pattern)
+                        
+                        # Check for restricted keywords (basic set)
+                        restricted_keywords = {
+                            "gambling": ["casino", "poker", "betting", "slots", "lottery"],
+                            "adult": ["xxx", "adult content", "nsfw"],
+                            "crypto": ["cryptocurrency", "bitcoin", "ico"],
+                            "pharmacy": ["viagra", "cialis", "prescription drugs"]
+                        }
+                        
+                        restricted_found = []
+                        for category, keywords in restricted_keywords.items():
+                            for keyword in keywords:
+                                if keyword in page_text:
+                                    restricted_found.append({
+                                        "category": category,
+                                        "keyword": keyword
+                                    })
+                        
+                        report["content_risk"] = {
+                            "dummy_words_detected": len(dummy_words_found) > 0,
+                            "dummy_words": dummy_words_found,
+                            "restricted_keywords_found": restricted_found,
+                            "risk_score": len(restricted_found) * 20 + (50 if len(dummy_words_found) > 0 else 0)
+                        }
+                        
+                        # ===========================================
+                        # 6. MCC CODE CLASSIFICATION
+                        # ===========================================
+                        
+                        # Comprehensive MCC Database with Categories
+                        mcc_database = {
+                            "Retail": {
+                                "Fashion & Clothing": {
+                                    "5621": {"description": "Women's Ready-to-Wear Stores", "keywords": ["women", "dress", "fashion", "boutique", "bridal", "maternity"]},
+                                    "5651": {"description": "Family Clothing Stores", "keywords": ["clothing", "apparel", "jeans", "casual", "wear", "family"]},
+                                    "5691": {"description": "Men's and Women's Clothing Stores", "keywords": ["unisex", "clothing", "apparel", "fashion"]},
+                                    "5611": {"description": "Men's and Boy's Clothing and Accessories Stores", "keywords": ["men", "suits", "shirts", "ties", "menswear"]},
+                                    "5631": {"description": "Women's Accessory and Specialty Shops", "keywords": ["accessories", "handbags", "lingerie", "scarves"]}
+                                },
+                                "Groceries & Food": {
+                                    "5411": {"description": "Grocery Stores, Supermarkets", "keywords": ["grocery", "supermarket", "food", "produce", "vegetables", "fruits", "organic"]},
+                                    "5499": {"description": "Misc. Food Stores - Convenience Stores", "keywords": ["convenience", "snack", "beverage", "kiosk"]},
+                                    "5462": {"description": "Bakeries", "keywords": ["bakery", "bread", "cake", "pastry", "cookies"]}
+                                },
+                                "Electronics & Appliances": {
+                                    "5732": {"description": "Electronics Stores", "keywords": ["electronics", "computer", "phone", "laptop", "camera", "gadget"]},
+                                    "5722": {"description": "Household Appliance Stores", "keywords": ["appliance", "refrigerator", "washer", "dryer", "microwave"]}
+                                },
+                                "Home & Garden": {
+                                    "5712": {"description": "Furniture, Home Furnishings, and Equipment Stores", "keywords": ["furniture", "sofa", "bed", "table", "chair", "decor"]},
+                                    "5200": {"description": "Home Supply Warehouse Stores", "keywords": ["home improvement", "diy", "lumber", "building materials"]},
+                                    "5261": {"description": "Lawn and Garden Supply Stores", "keywords": ["garden", "plants", "seeds", "fertilizer", "nursery"]}
+                                }
+                            },
+                            "Services": {
+                                "Professional Services": {
+                                    "7372": {"description": "Computer Programming, Data Processing, and Integrated Systems Design Services", "keywords": ["software", "saas", "programming", "development", "it services", "cloud"]},
+                                    "8999": {"description": "Professional Services (Not Elsewhere Classified)", "keywords": ["consulting", "agency", "professional", "expert"]},
+                                    "8111": {"description": "Legal Services and Attorneys", "keywords": ["legal", "lawyer", "attorney", "law firm"]}
+                                },
+                                "Education": {
+                                    "8299": {"description": "Schools and Educational Services (Not Elsewhere Classified)", "keywords": ["course", "training", "learning", "education", "tutor", "class"]},
+                                    "8220": {"description": "Colleges, Universities, Professional Schools, and Junior Colleges", "keywords": ["university", "college", "degree", "campus"]}
+                                },
+                                "Health & Beauty": {
+                                    "7230": {"description": "Beauty and Barber Shops", "keywords": ["salon", "hair", "beauty", "spa", "barber"]},
+                                    "8099": {"description": "Medical Services and Health Practitioners (Not Elsewhere Classified)", "keywords": ["health", "medical", "clinic", "care", "wellness"]}
+                                }
+                            },
+                            "Travel & Entertainment": {
+                                "Travel": {
+                                    "4722": {"description": "Travel Agencies and Tour Operators", "keywords": ["travel", "tour", "booking", "trip", "vacation"]},
+                                    "7011": {"description": "Lodging - Hotels, Motels, Resorts, Central Reservation Services", "keywords": ["hotel", "motel", "resort", "stay", "room"]}
+                                },
+                                "Dining": {
+                                    "5812": {"description": "Eating places and Restaurants", "keywords": ["restaurant", "dining", "cafe", "bistro", "food"]},
+                                    "5814": {"description": "Fast Food Restaurants", "keywords": ["fast food", "burger", "pizza", "takeout", "drive-thru"]}
+                                }
+                            }
+                        }
+                        
+                        matched_mccs = []
+                        
+                        # Flatten and search
+                        for category, subcategories in mcc_database.items():
+                            for subcategory, codes in subcategories.items():
+                                for mcc_code, details in codes.items():
+                                    score = 0
+                                    for keyword in details["keywords"]:
+                                        if keyword in page_text:
+                                            score += 1
+                                    
+                                    if score > 0:
+                                        matched_mccs.append({
+                                            "category": category,
+                                            "subcategory": subcategory,
+                                            "mcc_code": mcc_code,
+                                            "description": details["description"],
+                                            "confidence": min(score * 15, 100),
+                                            "keywords_matched": score
+                                        })
+                        
+                        # Sort by confidence
+                        matched_mccs.sort(key=lambda x: x["confidence"], reverse=True)
+                        
+                        report["mcc_codes"] = {
+                            "primary_mcc": matched_mccs[0] if matched_mccs else None,
+                            "secondary_mcc": matched_mccs[1] if len(matched_mccs) > 1 else None,
+                            "all_matches": matched_mccs[:10]  # Top 10 matches
+                        }
+                        
+                        # ===========================================
+                        # 7. PRODUCT/SERVICE DETECTION
+                        # ===========================================
+                        
+                        # Look for product indicators
+                        product_indicators = {
+                            "has_products": "product" in page_text or "shop" in page_text,
+                            "has_pricing": "price" in page_text or "$" in page_text or "₹" in page_text,
+                            "has_cart": "add to cart" in page_text or "buy now" in page_text,
+                            "ecommerce_platform": "shopify" in page_text or "woocommerce" in page_text
+                        }
+                        
+                        report["product_details"] = product_indicators
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error during content analysis: {e}")
+                        report["policy_details"] = {"error": str(e)}
+                    
+                    return json.dumps(report, indent=2)
+                    
+                except Exception as e:
+                    self.logger.error(f"Comprehensive scan failed: {e}")
+                    return json.dumps({"error": str(e), "url": url})
+
+            @tool
+            def analyze_competitor(company_name: str) -> str:
+                """
+                Analyze a competitor by searching for key information.
+                
+                Args:
+                    company_name: Name of the competitor
+                
+                Returns:
+                    Competitor intelligence summary
+                """
+                # Use the search tool logic internally
+                try:
+                    queries = [
+                        f"{company_name} company overview products",
+                        f"{company_name} pricing model",
+                        f"{company_name} recent news 2024",
+                        f"{company_name} competitors"
+                    ]
+                    
+                    combined_results = []
+                    with DDGS() as ddgs:
+                        for q in queries:
+                            results = list(ddgs.text(q, max_results=2))
+                            for r in results:
+                                combined_results.append(f"- {r['title']}: {r['body']} ({r['href']})")
+                    
+                    return f"Raw Research Data for {company_name}:\n\n" + "\n".join(combined_results)
+                except Exception as e:
+                    return f"Error analyzing competitor: {str(e)}"
+
+            @tool
+            def track_trends(topic: str) -> str:
+                """
+                Track trends for a specific topic.
+                
+                Args:
+                    topic: Topic to track
+                
+                Returns:
+                    Trend analysis data
+                """
+                try:
+                    queries = [
+                        f"{topic} trends 2024 2025",
+                        f"future of {topic}",
+                        f"{topic} market growth statistics"
+                    ]
+                    
+                    combined_results = []
+                    with DDGS() as ddgs:
+                        for q in queries:
+                            results = list(ddgs.text(q, max_results=3))
+                            for r in results:
+                                combined_results.append(f"- {r['title']}: {r['body']} ({r['href']})")
+                    
+                    return f"Trend Research Data for {topic}:\n\n" + "\n".join(combined_results)
+                except Exception as e:
+                    return f"Error tracking trends: {str(e)}"
+
+            @tool
+            def compliance_check(topic: str, industry: str = "general") -> str:
+                """
+                Check for compliance and regulatory updates.
+                
+                Args:
+                    topic: Specific compliance topic
+                    industry: Industry sector
+                
+                Returns:
+                    Regulatory information
+                """
+                try:
+                    queries = [
+                        f"{topic} regulations {industry} 2024",
+                        f"{topic} compliance requirements",
+                        f"{topic} legal risks {industry}"
+                    ]
+                    
+                    combined_results = []
+                    with DDGS() as ddgs:
+                        for q in queries:
+                            results = list(ddgs.text(q, max_results=3))
+                            for r in results:
+                                combined_results.append(f"- {r['title']}: {r['body']} ({r['href']})")
+                    
+                    return f"Compliance Research Data for {topic} ({industry}):\n\n" + "\n".join(combined_results)
+                except Exception as e:
+                    return f"Error checking compliance: {str(e)}"
+
+            @tool
+            def generate_report(research_data: str, report_type: str = "summary", format: str = "markdown") -> str:
+                """
+                Generate a structured research report from crawled data or research findings.
+                
+                Args:
+                    research_data: JSON string or text summary of research findings
+                    report_type: Type of report (summary, detailed, executive)
+                    format: Output format (markdown, json, text)
+                
+                Returns:
+                    Formatted report
+                """
+                try:
+                    # Try to parse as JSON first
+                    try:
+                        data = json.loads(research_data)
+                        is_json = True
+                    except:
+                        data = research_data
+                        is_json = False
+                    
+                    if format == "markdown":
+                        report = f"# Research Report\n\n"
+                        report += f"**Report Type:** {report_type}\n\n"
+                        
+                        if is_json and isinstance(data, dict):
+                            # Handle JSON from monitor_url
+                            if "base_url" in data:
+                                report += f"## Web Crawl Analysis\n\n"
+                                report += f"**Target URL:** {data.get('base_url', 'N/A')}\n\n"
+                                report += f"**Pages Crawled:** {data.get('pages_crawled', 0)}\n\n"
+                                report += f"**Total Keyword Matches:** {data.get('total_keyword_matches', 0)}\n\n"
+                                
+                                if data.get('pages'):
+                                    report += f"### Page Details\n\n"
+                                    for i, page in enumerate(data['pages'], 1):
+                                        report += f"#### {i}. {page.get('title', 'Untitled')}\n\n"
+                                        report += f"**URL:** {page.get('url', 'N/A')}\n\n"
+                                        
+                                        # Display keyword matches with context
+                                        keyword_matches = page.get('keyword_matches', [])
+                                        if keyword_matches:
+                                            report += f"**Keyword Matches Found:** {len(keyword_matches)}\n\n"
+                                            for match in keyword_matches:
+                                                keyword = match.get('keyword', 'N/A')
+                                                context = match.get('context', 'No context available')
+                                                report += f"- **Keyword:** `{keyword}`\n"
+                                                report += f"  **Context:** {context}\n\n"
+                                        else:
+                                            report += "**Keyword Matches:** None\n\n"
+                                        
+                                        report += f"**Content Preview:**\n\n{page.get('content_snippet', 'No content')}\n\n"
+                                        report += "---\n\n"
+                            else:
+                                # Generic JSON formatting
+                                report += f"## Data Summary\n\n```json\n{json.dumps(data, indent=2)}\n```\n\n"
+                        else:
+                            # Plain text data
+                            report += f"## Findings\n\n{data}\n\n"
+                        
+                        from datetime import datetime
+                        report += f"\n---\n\n*Report generated at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n"
+                        return report
+                    
+                    elif format == "json":
+                        if is_json:
+                            return json.dumps(data, indent=2)
+                        else:
+                            return json.dumps({"content": data, "type": report_type}, indent=2)
+                    
+                    else:  # text format
+                        if is_json and isinstance(data, dict):
+                            return f"Report Type: {report_type}\n\n" + json.dumps(data, indent=2)
+                        else:
+                            return f"Report Type: {report_type}\n\n{data}"
+                
+                except Exception as e:
+                    self.logger.error(f"Error generating report: {str(e)}")
+                    return f"Error generating report: {str(e)}"
+
+            # Register all tools
+            self.logger.info("Adding tools to agent...")
+            self.add_tool(search_web)
+            self.add_tool(monitor_url)
+            self.add_tool(comprehensive_site_scan)  # NEW: Comprehensive compliance scanner
+            self.add_tool(analyze_competitor)
+            self.add_tool(track_trends)
+            self.add_tool(compliance_check)
+            self.add_tool(generate_report)
+            self.logger.info(f"Tools registered: {[t.name for t in self.tools]}")
+            
+        except Exception as e:
+            self.logger.error(f"Error registering tools: {str(e)}", exc_info=True)
+            raise
+
+    def _run_agent_loop(self, system_prompt: str, user_prompt: str, task: Any) -> Dict[str, Any]:
+        """
+        Agent loop for market research tasks
+        """
+        # Customize prompt based on action
+        if hasattr(task, 'action') and task.action == 'web_crawler':
+            # Extract URL and keywords from the task input
+            # Frontend maps 'topic' to URL and 'filters.industry' to Keywords
+            # TaskInput model uses 'input_data', not 'input'
+            inputs = task.input_data if hasattr(task, 'input_data') else {}
+            url = inputs.get('topic', '')
+            filters = inputs.get('filters', {})
+            keywords = filters.get('industry', '')
+            
+            # Extract new crawler parameters
+            max_pages = inputs.get('max_pages', 5)
+            crawl_depth = inputs.get('crawl_depth', 1)
+            
+            user_prompt = (
+                f"Please use the `monitor_url` tool to crawl the following URL: {url}. "
+                f"Use these parameters: max_pages={max_pages}, depth={crawl_depth}. "
+                f"Check for these keywords: {keywords}. "
+                f"IMPORTANT: You must ONLY use the information returned by the `monitor_url` tool. "
+                f"Do not use your internal knowledge or search the web. "
+                f"If the tool returns no content or an error, state that clearly. "
+                f"Provide a detailed summary based strictly on the crawled content."
+            )
+        # We can add custom logic here if needed, but the base ReAct loop 
+        # (which calls LLM -> Tools -> LLM) should handle most cases if we use LangChain's agent.
+        # However, the base_agent.py implementation seems to be a simple LLM call 
+        # without an automatic tool loop in `_run_agent_loop`.
+        
+        # NOTE: The base_agent.py `_run_agent_loop` implementation shown in context 
+        # only does a single LLM call. To make tools work, we need to use 
+        # LangChain's AgentExecutor or implement a loop.
+        
+        # Let's override to use a proper agent executor if possible, 
+        # or just manually call tools if the base class doesn't support it.
+        # Given the base class structure, let's try to use the tools in the prompt 
+        # or rely on the LLM to ask for tool usage if we were using function calling.
+        
+        # Since the base class `_run_agent_loop` is simple, let's enhance it here 
+        # to support basic tool usage via ReAct or similar, 
+        # OR just rely on the LLM to do the work if it has the context.
+        
+        # BUT: The `BaseAgent` initializes `self.tools`.
+        # If we want real tool execution, we should use `create_react_agent` or similar.
+        
+        # Let's try to use LangChain's create_react_agent if available, 
+        # or implement a simple loop.
+        
+        from langchain.agents import AgentExecutor, create_react_agent
+        from langchain import hub
+        
+        # Pull the react prompt
+        # prompt = hub.pull("hwchase17/react") 
+        # We'll define a simple one to avoid pulling
+        from langchain.prompts import PromptTemplate
+        
+        template = """You are an AI agent that uses tools to answer questions. You MUST follow the EXACT format below.
+
+Available tools:
+{tools}
+
+CRITICAL FORMAT REQUIREMENTS:
+1. Do NOT use markdown formatting (no ###, **, or `)
+2. Do NOT add extra words or explanations in the Action or Action Input lines
+3. Action MUST be exactly one of: [{tool_names}]
+4. Action Input MUST be valid JSON or a simple string
+
+EXACT FORMAT YOU MUST USE:
+
+Question: the input question you must answer
+Thought: think about which tool to use
+Action: tool_name_here
+Action Input: {{"param1": "value1", "param2": "value2"}}
+Observation: the result will appear here
+... (repeat Thought/Action/Action Input/Observation as needed)
+Thought: I now know the final answer
+Final Answer: your final answer here
+
+EXAMPLE 1 - Correct Format:
+Question: Scan https://example.com
+Thought: I need to use the comprehensive_site_scan tool
+Action: comprehensive_site_scan
+Action Input: {{"url": "https://example.com", "business_name": ""}}
+Observation: (tool result appears here)
+
+EXAMPLE 2 - WRONG Format (DO NOT USE):
+### Action: comprehensive_site_scan
+**Action Input:** `https://example.com`, business_name: ''
+
+Now begin!
+
+Question: {input}
+Thought:{agent_scratchpad}"""
+
+        prompt = PromptTemplate.from_template(template)
+        
+        # Construct the ReAct agent
+        agent = create_react_agent(self.llm, self.tools, prompt)
+        
+        # Custom error handler that provides clear feedback to the LLM
+        def handle_parsing_error(error) -> str:
+            """Provide clear feedback when the LLM generates malformed output"""
+            error_msg = str(error)
+            if "not a valid tool" in error_msg.lower():
+                return (
+                    "ERROR: Invalid format detected. You MUST use the exact format specified:\n"
+                    "Action: tool_name\n"
+                    "Action Input: {\"param\": \"value\"}\n\n"
+                    "Do NOT use markdown (no ###, **, or `). Try again with the correct format."
+                )
+            return f"Parsing error: {error_msg}. Please check your response format and try again."
+        
+        # Create an agent executor with improved error handling
+        agent_executor = AgentExecutor(
+            agent=agent,
+            tools=self.tools,
+            verbose=True,
+            handle_parsing_errors=handle_parsing_error,
+            max_iterations=10,  # Prevent infinite loops
+            max_execution_time=300  # 5 minute timeout
+        )
+        
+        # Execute
+        try:
+            # Combine system prompt and user prompt for the input
+            full_input = f"{system_prompt}\n\nTask: {user_prompt}"
+            
+            result = agent_executor.invoke({"input": full_input})
+            response_text = result.get("output", "")
+            
+            # Check if the result indicates a failure
+            if not response_text or "Error executing agent" in response_text or "max iterations" in str(result).lower():
+                self.logger.error(f"Agent failed to complete task properly. Result: {result}")
+                raise Exception(f"Agent failed: {response_text or 'No output generated'}")
+            
+        except Exception as e:
+            # Agent execution failed - this will be caught by base class and returned as failed status
+            self.logger.error(f"Agent execution failed: {e}", exc_info=True)
+            raise  # Re-raise to let base class handle it properly
+
+        return {
+            "response": response_text,
+            "action": task.action,
+            "completed_at": "now" # In real code use datetime
+        }
     
     def _get_system_prompt(self) -> str:
         """Market research agent system prompt"""
-        return """You are a professional Market Research AI agent.
-
-Your role is to help with comprehensive market intelligence, competitor analysis, and compliance monitoring.
-You have access to real-time web search (DuckDuckGo) and web crawling tools.
-
+        system_message = """CRITICAL INSTRUCTION:
+    When using `monitor_url` or `comprehensive_site_scan`, you MUST return the raw JSON output from the tool exactly as is.
+    DO NOT summarize. DO NOT reformat. DO NOT wrap in markdown (no ```json blocks).
+    Just return the JSON string. The frontend needs RAW JSON to render the dashboard.
+    
+    You are an advanced Market Research AI Agent.
+    Your goal is to gather deep market intelligence, analyze competitors, and track industry trends.
+    
+    For other tools, provide a professional, structured analysis.
+    """
+        return system_message + """
 Guidelines:
 - ALWAYS cite sources (URLs) for your information.
 - When asked to research a topic, use the `search_web` tool to find recent information.

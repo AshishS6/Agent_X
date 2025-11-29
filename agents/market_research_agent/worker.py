@@ -111,17 +111,33 @@ def process_task(task_data: dict):
 
 
 def listen_for_tasks():
-    """Main worker loop - listen for tasks on Redis queue"""
+    """Main worker loop - listen for tasks on Redis queue using Consumer Groups"""
     logger.info(f"Market Research Agent Worker started, listening on {QUEUE_NAME}")
-    logger.info(f"Using LLM provider: {os.getenv('DEFAULT_LLM_PROVIDER', 'openai')}")
+    provider = os.getenv("LLM_PROVIDER", os.getenv("DEFAULT_LLM_PROVIDER", "openai"))
+    logger.info(f"Using LLM provider: {provider}")
     
-    last_id = "0-0"  # Start from beginning
+    # Create consumer group if it doesn't exist
+    try:
+        # mkstream=True creates the stream if it doesn't exist
+        redis_client.xgroup_create(QUEUE_NAME, "market_research_workers", id="0", mkstream=True)
+        logger.info("Created consumer group 'market_research_workers'")
+    except redis.exceptions.ResponseError as e:
+        if "BUSYGROUP" in str(e):
+            logger.info("Consumer group 'market_research_workers' already exists")
+        else:
+            logger.error(f"Error creating consumer group: {e}")
+            raise
+
+    consumer_name = f"worker_{os.getpid()}"
     
     while True:
         try:
-            # Read from stream
-            messages = redis_client.xread(
-                {QUEUE_NAME: last_id},
+            # Read from stream using consumer group
+            # '>' means "messages never delivered to other consumers in this group"
+            messages = redis_client.xreadgroup(
+                "market_research_workers",
+                consumer_name,
+                {QUEUE_NAME: ">"},
                 count=1,
                 block=5000  # Block for 5 seconds
             )
@@ -139,12 +155,13 @@ def listen_for_tasks():
                         # Process task
                         process_task(task_data)
                         
-                        # Update last_id for next iteration
-                        last_id = message_id
+                        # Acknowledge message so it's not processed again
+                        redis_client.xack(QUEUE_NAME, "market_research_workers", message_id)
                         
                     except Exception as e:
                         logger.error(f"Error processing message {message_id}: {e}")
-                        last_id = message_id  # Move past failed message
+                        # We don't ack failed messages immediately so they can be retried 
+                        # (or you might want to ack and move to a DLQ depending on policy)
                         
         except KeyboardInterrupt:
             logger.info("Worker shutting down...")

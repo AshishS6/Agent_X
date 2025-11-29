@@ -23,6 +23,11 @@ from main import create_sales_agent
 env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'backend', '.env')
 load_dotenv(env_path)
 
+# Load local agent env if exists (overrides backend)
+local_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+if os.path.exists(local_env_path):
+    load_dotenv(local_env_path, override=True)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

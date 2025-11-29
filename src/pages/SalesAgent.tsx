@@ -21,7 +21,7 @@ const SalesAgent = () => {
 
                 if (salesAgent) {
                     setAgentId(salesAgent.id);
-                    const [agentMetrics, agentTasks] = await Promise.all([
+                    const [agentMetrics, { tasks: agentTasks }] = await Promise.all([
                         AgentService.getMetrics(salesAgent.id),
                         TaskService.getAll({ agentId: salesAgent.id, limit: 10 })
                     ]);
@@ -54,7 +54,7 @@ const SalesAgent = () => {
 
     const handleTaskCreated = useCallback(() => {
         if (agentId) {
-            TaskService.getAll({ agentId, limit: 10 }).then(setTasks);
+            TaskService.getAll({ agentId, limit: 10 }).then(({ tasks }) => setTasks(tasks));
         }
     }, [agentId]);
 
