@@ -894,198 +894,34 @@ class MarketResearchAgent(BaseAgent):
         Agent loop for market research tasks
         """
         # Customize prompt based on action
-        if hasattr(task, 'action') and task.action == 'web_crawler':
-            # Extract URL and keywords from the task input
-            # Frontend maps 'topic' to URL and 'filters.industry' to Keywords
-            # TaskInput model uses 'input_data', not 'input'
-            inputs = task.input_data if hasattr(task, 'input_data') else {}
-            url = inputs.get('topic', '')
-            filters = inputs.get('filters', {})
-            keywords = filters.get('industry', '')
-            
-            # Extract new crawler parameters
-            max_pages = inputs.get('max_pages', 5)
-            crawl_depth = inputs.get('crawl_depth', 1)
-            
-            user_prompt = (
-                f"Please use the `monitor_url` tool to crawl the following URL: {url}. "
-                f"Use these parameters: max_pages={max_pages}, depth={crawl_depth}. "
-                f"Check for these keywords: {keywords}. "
-                f"IMPORTANT: You must ONLY use the information returned by the `monitor_url` tool. "
-                f"Do not use your internal knowledge or search the web. "
-                f"If the tool returns no content or an error, state that clearly. "
-                f"Provide a detailed summary based strictly on the crawled content."
-            )
-        # We can add custom logic here if needed, but the base ReAct loop 
-        # (which calls LLM -> Tools -> LLM) should handle most cases if we use LangChain's agent.
-        # However, the base_agent.py implementation seems to be a simple LLM call 
-        # without an automatic tool loop in `_run_agent_loop`.
-        
-        # NOTE: The base_agent.py `_run_agent_loop` implementation shown in context 
-        # only does a single LLM call. To make tools work, we need to use 
-        # LangChain's AgentExecutor or implement a loop.
-        
-        # Let's override to use a proper agent executor if possible, 
-        # or just manually call tools if the base class doesn't support it.
-        # Given the base class structure, let's try to use the tools in the prompt 
-        # or rely on the LLM to ask for tool usage if we were using function calling.
-        
-        # Since the base class `_run_agent_loop` is simple, let's enhance it here 
-        # to support basic tool usage via ReAct or similar, 
-        # OR just rely on the LLM to do the work if it has the context.
-        
-        # BUT: The `BaseAgent` initializes `self.tools`.
-        # If we want real tool execution, we should use `create_react_agent` or similar.
-        
-        # Let's try to use LangChain's create_react_agent if available, 
-        # or implement a simple loop.
-        
-        from langchain.agents import AgentExecutor, create_react_agent
-        from langchain import hub
-        
-        # Pull the react prompt
-        # prompt = hub.pull("hwchase17/react") 
-        # We'll define a simple one to avoid pulling
-        from langchain.prompts import PromptTemplate
-        
-        template = """You are an AI agent that uses tools to answer questions. You MUST follow the EXACT format below.
-
-Available tools:
-{tools}
-
-CRITICAL FORMAT REQUIREMENTS:
-1. Do NOT use markdown formatting (no ###, **, or `)
-2. Do NOT add extra words or explanations in the Action or Action Input lines
-3. Action MUST be exactly one of: [{tool_names}]
-4. Action Input MUST be valid JSON or a simple string
-
-EXACT FORMAT YOU MUST USE:
-
-Question: the input question you must answer
-Thought: think about which tool to use
-Action: tool_name_here
-Action Input: {{"param1": "value1", "param2": "value2"}}
-Observation: the result will appear here
-... (repeat Thought/Action/Action Input/Observation as needed)
-Thought: I now know the final answer
-Final Answer: your final answer here
-
-EXAMPLE 1 - Correct Format:
-Question: Scan https://example.com
-Thought: I need to use the comprehensive_site_scan tool
-Action: comprehensive_site_scan
-Action Input: {{"url": "https://example.com", "business_name": ""}}
-Observation: (tool result appears here)
-
-EXAMPLE 2 - WRONG Format (DO NOT USE):
-### Action: comprehensive_site_scan
-**Action Input:** `https://example.com`, business_name: ''
-
-Now begin!
-
-Question: {input}
-Thought:{agent_scratchpad}"""
-
-        prompt = PromptTemplate.from_template(template)
-        
-        # Construct the ReAct agent
-        agent = create_react_agent(self.llm, self.tools, prompt)
-        
-        # Custom error handler that provides clear feedback to the LLM
-        def handle_parsing_error(error) -> str:
-            """Provide clear feedback when the LLM generates malformed output"""
-            error_msg = str(error)
-            if "not a valid tool" in error_msg.lower():
-                return (
-                    "ERROR: Invalid format detected. You MUST use the exact format specified:\n"
-                    "Action: tool_name\n"
-                    "Action Input: {\"param\": \"value\"}\n\n"
-                    "Do NOT use markdown (no ###, **, or `). Try again with the correct format."
+        if hasattr(task, 'action'):
+            if task.action == 'web_crawler':
+                # Extract URL and keywords from the task input
+                inputs = task.input_data if hasattr(task, 'input_data') else {}
+                url = inputs.get('topic', '')
+                filters = inputs.get('filters', {})
+                keywords = filters.get('industry', '')
+                
+                # Extract new crawler parameters
+                max_pages = inputs.get('max_pages', 5)
+                crawl_depth = inputs.get('crawl_depth', 1)
+                
+                user_prompt = (
+                    f"Action: monitor_url\n"
+                    f"Action Input: {{\"url\": \"{url}\", \"keywords\": \"{keywords}\", \"max_pages\": {max_pages}, \"depth\": {crawl_depth}}}\n\n"
+                    f"CRITICAL: The Final Answer MUST be the raw JSON returned by the tool. Do not generate a summary."
                 )
-            return f"Parsing error: {error_msg}. Please check your response format and try again."
-        
-        # Create an agent executor with improved error handling
-        agent_executor = AgentExecutor(
-            agent=agent,
-            tools=self.tools,
-            verbose=True,
-            handle_parsing_errors=handle_parsing_error,
-            max_iterations=10,  # Prevent infinite loops
-            max_execution_time=300  # 5 minute timeout
-        )
-        
-        # Execute
-        try:
-            # Combine system prompt and user prompt for the input
-            full_input = f"{system_prompt}\n\nTask: {user_prompt}"
-            
-            result = agent_executor.invoke({"input": full_input})
-            response_text = result.get("output", "")
-            
-            # Check if the result indicates a failure
-            if not response_text or "Error executing agent" in response_text or "max iterations" in str(result).lower():
-                self.logger.error(f"Agent failed to complete task properly. Result: {result}")
-                raise Exception(f"Agent failed: {response_text or 'No output generated'}")
-            
-        except Exception as e:
-            # Agent execution failed - this will be caught by base class and returned as failed status
-            self.logger.error(f"Agent execution failed: {e}", exc_info=True)
-            raise  # Re-raise to let base class handle it properly
-
-        return {
-            "response": response_text,
-            "action": task.action,
-            "completed_at": "now" # In real code use datetime
-        }
-    
-    def _get_system_prompt(self) -> str:
-        """Market research agent system prompt"""
-        system_message = """CRITICAL INSTRUCTION:
-    When using `monitor_url` or `comprehensive_site_scan`, you MUST return the raw JSON output from the tool exactly as is.
-    DO NOT summarize. DO NOT reformat. DO NOT wrap in markdown (no ```json blocks).
-    Just return the JSON string. The frontend needs RAW JSON to render the dashboard.
-    
-    You are an advanced Market Research AI Agent.
-    Your goal is to gather deep market intelligence, analyze competitors, and track industry trends.
-    
-    For other tools, provide a professional, structured analysis.
-    """
-        return system_message + """
-Guidelines:
-- ALWAYS cite sources (URLs) for your information.
-- When asked to research a topic, use the `search_web` tool to find recent information.
-- When asked to monitor a specific site, use `monitor_url`.
-- For competitor analysis, use `analyze_competitor` or manual search.
-- Provide data-driven insights.
-- If you find conflicting information, note it.
-- Be objective and professional.
-
-When generating the final response:
-- Structure it clearly with headings.
-- Include a "Key Findings" section.
-- Include a "Sources" section.
-- If it's a compliance check, highlight risks clearly.
-"""
-    
-    def _run_agent_loop(self, system_prompt: str, user_prompt: str, task: Any) -> Dict[str, Any]:
-        """
-        Agent loop for market research tasks
-        """
-        # Customize prompt based on action
-        if hasattr(task, 'action') and task.action == 'web_crawler':
-            # Extract URL and keywords from the task input
-            # Frontend maps 'topic' to URL and 'filters.industry' to Keywords
-            # TaskInput model uses 'input_data', not 'input'
-            inputs = task.input_data if hasattr(task, 'input_data') else {}
-            url = inputs.get('topic', '')
-            filters = inputs.get('filters', {})
-            keywords = filters.get('industry', '')
-            
-            user_prompt = (
-                f"Please use the `monitor_url` tool to crawl the following URL: {url}. "
-                f"Check for these keywords: {keywords}. "
-                f"Provide a detailed summary of the content and list any keyword matches found."
-            )
+                
+            elif task.action == 'site_scan':
+                inputs = task.input_data if hasattr(task, 'input_data') else {}
+                url = inputs.get('topic', '')
+                business_name = inputs.get('filters', {}).get('business_name', '')
+                
+                user_prompt = (
+                    f"Action: comprehensive_site_scan\n"
+                    f"Action Input: {{\"url\": \"{url}\", \"business_name\": \"{business_name}\"}}\n\n"
+                    f"CRITICAL: The Final Answer MUST be the raw JSON returned by the tool. Do not generate a summary."
+                )
         # We can add custom logic here if needed, but the base ReAct loop 
         # (which calls LLM -> Tools -> LLM) should handle most cases if we use LangChain's agent.
         # However, the base_agent.py implementation seems to be a simple LLM call 
@@ -1104,20 +940,66 @@ When generating the final response:
         # to support basic tool usage via ReAct or similar, 
         # OR just rely on the LLM to do the work if it has the context.
         
-        # BUT: The `BaseAgent` initializes `self.tools`.
-        # If we want real tool execution, we should use `create_react_agent` or similar.
-        
-        # Let's try to use LangChain's create_react_agent if available, 
-        # or implement a simple loop.
-        
+        # Custom output parser for robust handling
+        # Custom output parser for robust handling
+        from langchain.agents.output_parsers import ReActSingleInputOutputParser
+        from langchain.schema import AgentAction, AgentFinish, OutputParserException
         from langchain.agents import AgentExecutor, create_react_agent
-        from langchain import hub
-        
-        # Pull the react prompt
-        # prompt = hub.pull("hwchase17/react") 
-        # We'll define a simple one to avoid pulling
+        import re
+
+        class RobustReActOutputParser(ReActSingleInputOutputParser):
+            """Parser that tries to recover from common LLM formatting errors"""
+            
+            def parse(self, text: str):
+                try:
+                    # Clean up text - sometimes models put markdown blocks around everything
+                    cleaned_text = text.strip()
+                    if cleaned_text.startswith("```") and cleaned_text.endswith("```"):
+                        # Remove first and last line
+                        lines = cleaned_text.splitlines()
+                        if len(lines) >= 2:
+                            cleaned_text = "\n".join(lines[1:-1])
+                    
+                    # Try standard parsing first
+                    return super().parse(cleaned_text)
+                except Exception as e:
+                    # Fallback recovery logic
+                    
+                    # Check if we have an Action and Action Input but formatting is slightly off
+                    # e.g. "Action: tool_name\nAction Input: {json}" (missing Thought)
+                    
+                    action_match = re.search(r'Action:\s*([^\n]+)', text, re.IGNORECASE)
+                    input_match = re.search(r'Action Input:\s*(.+)', text, re.IGNORECASE | re.DOTALL)
+                    
+                    if action_match and input_match:
+                        action = action_match.group(1).strip()
+                        action_input = input_match.group(1).strip()
+                        
+                        # Clean up action input if it has extra text at the end
+                        # This is tricky without a clear delimiter, but let's try to parse JSON
+                        # or take the first line if it looks like a simple string
+                        
+                        # Try to find a JSON block in the input
+                        json_match = re.search(r'(\{.*\})', action_input, re.DOTALL)
+                        if json_match:
+                            action_input = json_match.group(1)
+                        
+                        return AgentAction(tool=action, tool_input=action_input, log=text)
+                    
+                    # Check if it's a Final Answer but malformed
+                    final_answer_match = re.search(r'Final Answer:\s*(.+)', text, re.IGNORECASE | re.DOTALL)
+                    if final_answer_match:
+                        return AgentFinish(return_values={"output": final_answer_match.group(1).strip()}, log=text)
+                        
+                    # If we really can't parse it, but it looks like a final response (no Action keyword), treat as Final Answer
+                    if "Action:" not in text:
+                        return AgentFinish(return_values={"output": text}, log=text)
+                        
+                    raise OutputParserException(f"Could not parse LLM output: {text}")
+
         from langchain.prompts import PromptTemplate
         
+        # Basic ReAct Prompt Template
         template = """Answer the following questions as best you can. You have access to the following tools:
 
 {tools}
@@ -1140,11 +1022,24 @@ Thought:{agent_scratchpad}"""
 
         prompt = PromptTemplate.from_template(template)
         
-        # Construct the ReAct agent
-        agent = create_react_agent(self.llm, self.tools, prompt)
+        # Construct the ReAct agent with custom parser
+        agent = create_react_agent(self.llm, self.tools, prompt, output_parser=RobustReActOutputParser())
         
-        # Create an agent executor by passing in the agent and tools
-        agent_executor = AgentExecutor(agent=agent, tools=self.tools, verbose=True, handle_parsing_errors=True)
+        # Custom error handler that provides clear feedback to the LLM
+        def handle_parsing_error(error) -> str:
+            """Provide clear feedback when the LLM generates malformed output"""
+            return f"formatting_error: {str(error)}. Please follow the format: Action: <tool_name> [newline] Action Input: <input>"
+        
+        # Create an agent executor with improved error handling
+        agent_executor = AgentExecutor(
+            agent=agent,
+            tools=self.tools,
+            verbose=True,
+            handle_parsing_errors=handle_parsing_error,
+            max_iterations=10,  # Prevent infinite loops
+            max_execution_time=300,  # 5 minute timeout
+            return_intermediate_steps=True
+        )
         
         # Execute
         try:
@@ -1152,18 +1047,45 @@ Thought:{agent_scratchpad}"""
             full_input = f"{system_prompt}\n\nTask: {user_prompt}"
             
             result = agent_executor.invoke({"input": full_input})
-            response_text = result["output"]
+            response_text = result.get("output", "")
+            
+            # Check if the result indicates a failure
+            if not response_text or "Error executing agent" in response_text or "max iterations" in str(result).lower():
+                self.logger.error(f"Agent failed to complete task properly. Result: {result}")
+                # Don't raise immediately, try to return what we have
+                if not response_text:
+                     response_text = "Task executed but no final summary was generated."
             
         except Exception as e:
-            # Fallback to simple generation if agent fails
-            self.logger.error(f"Agent execution failed: {e}")
-            response_text = f"Error executing agent: {str(e)}"
+            # Agent execution failed - this will be caught by base class and returned as failed status
+            self.logger.error(f"Agent execution failed: {e}", exc_info=True)
+            raise  # Re-raise to let base class handle it properly
 
         return {
             "response": response_text,
             "action": task.action,
             "completed_at": "now" # In real code use datetime
         }
+    
+    def _get_system_prompt(self) -> str:
+        """Market research agent system prompt"""
+        return """CRITICAL INSTRUCTION:
+    When using `monitor_url` or `comprehensive_site_scan`, you MUST return the raw JSON output from the tool exactly as is.
+    DO NOT summarize. DO NOT reformat. DO NOT wrap in markdown (no ```json blocks).
+    Just return the JSON string. The frontend needs RAW JSON to render the dashboard.
+    
+    You are an advanced Market Research AI Agent.
+    Your goal is to gather deep market intelligence, analyze competitors, and track industry trends.
+    
+    Guidelines:
+    - ALWAYS cite sources (URLs) for your information.
+    - When asked to monitor a specific site, use `monitor_url` and return the JSON.
+    - When asked for a site scan, use `comprehensive_site_scan` and return the JSON.
+    - For OTHER tasks (competitor analysis, trends):
+      - Structure it clearly with headings.
+      - Include a "Key Findings" section.
+      - Include a "Sources" section.
+    """
 
 
 # Create default market research agent instance

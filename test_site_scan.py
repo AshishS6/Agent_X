@@ -1,7 +1,11 @@
 
 import sys
+import os
 import time
 import logging
+
+# Add agents directory to path
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'agents'))
 from agents.market_research_agent.main import create_market_research_agent
 
 # Configure logging

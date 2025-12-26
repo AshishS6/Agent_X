@@ -465,13 +465,22 @@ const MarketResearchAgent = () => {
                                 // Try to parse as JSON first
                                 let crawlData: any = null;
                                 try {
-                                    const response = selectedTask.output?.response;
-                                    // Check for either monitor_url format (base_url) or comprehensive_site_scan format (compliance_checks)
-                                    if (typeof response === 'string' && (response.includes('"base_url"') || response.includes('"compliance_checks"'))) {
-                                        // Try to find JSON object in the response
-                                        const jsonMatch = response.match(/\{[\s\S]*("base_url"|"compliance_checks")[\s\S]*\}/);
-                                        if (jsonMatch) {
-                                            crawlData = JSON.parse(jsonMatch[0]);
+                                    let response = selectedTask.output?.response;
+
+                                    // Handle string response
+                                    if (typeof response === 'string') {
+                                        // 1. Strip Markdown code blocks
+                                        response = response.replace(/```json\n|```/g, '').trim();
+
+                                        // 2. Try parsing entire string
+                                        try {
+                                            crawlData = JSON.parse(response);
+                                        } catch (e) {
+                                            // 3. Fallback: try to find JSON object if mixed with text
+                                            const jsonMatch = response.match(/\{[\s\S]*\}/);
+                                            if (jsonMatch) {
+                                                crawlData = JSON.parse(jsonMatch[0]);
+                                            }
                                         }
                                     } else if (typeof response === 'object') {
                                         crawlData = response;
@@ -480,8 +489,8 @@ const MarketResearchAgent = () => {
                                     console.error("Failed to parse crawl data", e);
                                 }
 
-                                if (!crawlData) {
-                                    // Fallback for non-crawler tasks
+                                if (!crawlData || (!crawlData.comprehensive_site_scan && !crawlData.compliance_checks && !crawlData.base_url)) {
+                                    // Fallback for non-crawler tasks or failed parsing
                                     const output = selectedTask.output;
                                     const content = output?.response || output?.analysis || JSON.stringify(output, null, 2);
                                     return (
@@ -494,6 +503,9 @@ const MarketResearchAgent = () => {
                                         </div>
                                     );
                                 }
+
+                                // Normalize data if needed
+                                const siteScan = crawlData.comprehensive_site_scan;
 
                                 // Render Tabbed Interface for Crawler Results
                                 return (
@@ -525,94 +537,173 @@ const MarketResearchAgent = () => {
                                         <div className="flex-1 overflow-y-auto p-6 bg-gray-900/50">
                                             {activeTab === 'compliance' && (
                                                 <div className="space-y-6">
-                                                    {/* Status Cards */}
-                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                        {/* Liveness */}
-                                                        <div className={`p-4 rounded-lg border ${crawlData.compliance_checks?.liveness?.status === 'pass'
-                                                            ? 'bg-green-500/10 border-green-500/30'
-                                                            : 'bg-red-500/10 border-red-500/30'
-                                                            }`}>
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                {crawlData.compliance_checks?.liveness?.status === 'pass'
-                                                                    ? <CheckCircle className="text-green-500" size={20} />
-                                                                    : <AlertTriangle className="text-red-500" size={20} />
-                                                                }
-                                                                <h3 className="font-semibold text-white">Liveness</h3>
-                                                            </div>
-                                                            <p className="text-sm text-gray-300">{crawlData.compliance_checks?.liveness?.message || 'Status unknown'}</p>
-                                                        </div>
+                                                    {/* NEW: Comprehensive Site Scan View */}
+                                                    {siteScan ? (
+                                                        <div className="space-y-6">
+                                                            {/* General Compliance Status */}
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                                {/* General */}
+                                                                <div className={`p-6 rounded-lg border ${siteScan.compliance?.general?.pass
+                                                                    ? 'bg-green-500/10 border-green-500/30'
+                                                                    : 'bg-red-500/10 border-red-500/30'
+                                                                    }`}>
+                                                                    <div className="flex items-center gap-3 mb-4">
+                                                                        {siteScan.compliance?.general?.pass
+                                                                            ? <CheckCircle className="text-green-500" size={24} />
+                                                                            : <AlertTriangle className="text-red-500" size={24} />
+                                                                        }
+                                                                        <h3 className="text-lg font-bold text-white">General Compliance</h3>
+                                                                    </div>
 
-                                                        {/* Redirection */}
-                                                        <div className={`p-4 rounded-lg border ${crawlData.compliance_checks?.redirection?.status === 'pass'
-                                                            ? 'bg-green-500/10 border-green-500/30'
-                                                            : 'bg-yellow-500/10 border-yellow-500/30'
-                                                            }`}>
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                {crawlData.compliance_checks?.redirection?.status === 'pass'
-                                                                    ? <CheckCircle className="text-green-500" size={20} />
-                                                                    : <AlertTriangle className="text-yellow-500" size={20} />
-                                                                }
-                                                                <h3 className="font-semibold text-white">Redirection</h3>
-                                                            </div>
-                                                            <p className="text-sm text-gray-300">{crawlData.compliance_checks?.redirection?.message || 'No redirects detected'}</p>
-                                                        </div>
+                                                                    {/* Alerts */}
+                                                                    {siteScan.compliance?.general?.alerts?.length > 0 && (
+                                                                        <div className="space-y-3 mb-4">
+                                                                            {siteScan.compliance.general.alerts.map((alert: any, idx: number) => (
+                                                                                <div key={idx} className="bg-black/30 p-3 rounded border border-red-500/20">
+                                                                                    <div className="flex gap-2 text-red-300 font-medium mb-1">
+                                                                                        <AlertTriangle size={14} className="mt-0.5" />
+                                                                                        {alert.code}: {alert.type}
+                                                                                    </div>
+                                                                                    <p className="text-sm text-gray-400">{alert.description}</p>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
 
-                                                        {/* Vintage */}
-                                                        <div className={`p-4 rounded-lg border ${crawlData.compliance_checks?.vintage?.status === 'pass'
-                                                            ? 'bg-green-500/10 border-green-500/30'
-                                                            : 'bg-red-500/10 border-red-500/30'
-                                                            }`}>
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                {crawlData.compliance_checks?.vintage?.status === 'pass'
-                                                                    ? <CheckCircle className="text-green-500" size={20} />
-                                                                    : <AlertTriangle className="text-red-500" size={20} />
-                                                                }
-                                                                <h3 className="font-semibold text-white">Vintage of Website</h3>
-                                                            </div>
-                                                            <p className="text-sm text-gray-300">{crawlData.compliance_checks?.vintage?.message || 'Age unknown'}</p>
-                                                        </div>
-                                                    </div>
+                                                                    {/* Actions Needed */}
+                                                                    {siteScan.compliance?.general?.actions_needed?.length > 0 && (
+                                                                        <div>
+                                                                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Actions Needed:</h4>
+                                                                            <ul className="space-y-2">
+                                                                                {siteScan.compliance.general.actions_needed.map((action: any, idx: number) => (
+                                                                                    <li key={idx} className="text-sm text-gray-400 flex gap-2">
+                                                                                        <span className="text-blue-400">•</span>
+                                                                                        <span>{action.description}</span>
+                                                                                    </li>
+                                                                                ))}
+                                                                            </ul>
+                                                                        </div>
+                                                                    )}
 
-                                                    {/* Details Tables */}
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                        <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
-                                                            <h3 className="text-lg font-semibold text-white mb-4">URL & Domain details</h3>
-                                                            <div className="space-y-3 text-sm">
-                                                                <div className="flex justify-between py-2 border-b border-gray-700">
-                                                                    <span className="text-gray-400">Link</span>
-                                                                    <a href={crawlData.url} target="_blank" className="text-blue-400 hover:underline truncate max-w-[200px]">{crawlData.url}</a>
+                                                                    {siteScan.compliance?.general?.pass && !siteScan.compliance?.general?.alerts?.length && (
+                                                                        <p className="text-green-400">All general compliance checks passed.</p>
+                                                                    )}
                                                                 </div>
-                                                                <div className="flex justify-between py-2 border-b border-gray-700">
-                                                                    <span className="text-gray-400">Domain Provider</span>
-                                                                    <span className="text-white">{crawlData.compliance_checks?.url_details?.domain_provider || 'Unknown'}</span>
-                                                                </div>
-                                                                <div className="flex justify-between py-2 border-b border-gray-700">
-                                                                    <span className="text-gray-400">Registered On</span>
-                                                                    <span className="text-white">{crawlData.compliance_checks?.url_details?.domain_registered_on || 'Unknown'}</span>
-                                                                </div>
-                                                                <div className="flex justify-between py-2">
-                                                                    <span className="text-gray-400">Vintage Days</span>
-                                                                    <span className="text-white">{crawlData.compliance_checks?.url_details?.vintage_days || 'N/A'}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
 
-                                                        <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
-                                                            <h3 className="text-lg font-semibold text-white mb-4">SSL Certificate</h3>
-                                                            <div className="space-y-3 text-sm">
-                                                                <div className="flex justify-between py-2 border-b border-gray-700">
-                                                                    <span className="text-gray-400">Status</span>
-                                                                    <span className={crawlData.compliance_checks?.ssl_certificate?.valid ? "text-green-400" : "text-red-400"}>
-                                                                        {crawlData.compliance_checks?.ssl_certificate?.valid ? "Valid" : "Invalid"}
-                                                                    </span>
-                                                                </div>
-                                                                <div className="flex justify-between py-2 border-b border-gray-700">
-                                                                    <span className="text-gray-400">Hostname</span>
-                                                                    <span className="text-white">{crawlData.compliance_checks?.ssl_certificate?.server_hostname || 'N/A'}</span>
+                                                                {/* Payment Terms */}
+                                                                <div className={`p-6 rounded-lg border ${siteScan.compliance?.payment_terms?.pass
+                                                                    ? 'bg-green-500/10 border-green-500/30'
+                                                                    : 'bg-yellow-500/10 border-yellow-500/30'
+                                                                    }`}>
+                                                                    <div className="flex items-center gap-3 mb-4">
+                                                                        {siteScan.compliance?.payment_terms?.pass
+                                                                            ? <CheckCircle className="text-green-500" size={24} />
+                                                                            : <AlertTriangle className="text-yellow-500" size={24} />
+                                                                        }
+                                                                        <h3 className="text-lg font-bold text-white">Payment Terms</h3>
+                                                                    </div>
+
+                                                                    {siteScan.compliance?.payment_terms?.pass ? (
+                                                                        <p className="text-green-400">Payment terms validate successfully.</p>
+                                                                    ) : (
+                                                                        <p className="text-yellow-400">Review payment terms for potential issues.</p>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </div>
+                                                    ) : (
+                                                        // OLD: Legacy Compliance View
+                                                        <div className="space-y-6">
+                                                            {/* Status Cards */}
+                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                                {/* Liveness */}
+                                                                <div className={`p-4 rounded-lg border ${crawlData.compliance_checks?.liveness?.status === 'pass'
+                                                                    ? 'bg-green-500/10 border-green-500/30'
+                                                                    : 'bg-red-500/10 border-red-500/30'
+                                                                    }`}>
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        {crawlData.compliance_checks?.liveness?.status === 'pass'
+                                                                            ? <CheckCircle className="text-green-500" size={20} />
+                                                                            : <AlertTriangle className="text-red-500" size={20} />
+                                                                        }
+                                                                        <h3 className="font-semibold text-white">Liveness</h3>
+                                                                    </div>
+                                                                    <p className="text-sm text-gray-300">{crawlData.compliance_checks?.liveness?.message || 'Status unknown'}</p>
+                                                                </div>
+
+                                                                {/* Redirection */}
+                                                                <div className={`p-4 rounded-lg border ${crawlData.compliance_checks?.redirection?.status === 'pass'
+                                                                    ? 'bg-green-500/10 border-green-500/30'
+                                                                    : 'bg-yellow-500/10 border-yellow-500/30'
+                                                                    }`}>
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        {crawlData.compliance_checks?.redirection?.status === 'pass'
+                                                                            ? <CheckCircle className="text-green-500" size={20} />
+                                                                            : <AlertTriangle className="text-yellow-500" size={20} />
+                                                                        }
+                                                                        <h3 className="font-semibold text-white">Redirection</h3>
+                                                                    </div>
+                                                                    <p className="text-sm text-gray-300">{crawlData.compliance_checks?.redirection?.message || 'No redirects detected'}</p>
+                                                                </div>
+
+                                                                {/* Vintage */}
+                                                                <div className={`p-4 rounded-lg border ${crawlData.compliance_checks?.vintage?.status === 'pass'
+                                                                    ? 'bg-green-500/10 border-green-500/30'
+                                                                    : 'bg-red-500/10 border-red-500/30'
+                                                                    }`}>
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        {crawlData.compliance_checks?.vintage?.status === 'pass'
+                                                                            ? <CheckCircle className="text-green-500" size={20} />
+                                                                            : <AlertTriangle className="text-red-500" size={20} />
+                                                                        }
+                                                                        <h3 className="font-semibold text-white">Vintage of Website</h3>
+                                                                    </div>
+                                                                    <p className="text-sm text-gray-300">{crawlData.compliance_checks?.vintage?.message || 'Age unknown'}</p>
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Details Tables */}
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                                <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
+                                                                    <h3 className="text-lg font-semibold text-white mb-4">URL & Domain details</h3>
+                                                                    <div className="space-y-3 text-sm">
+                                                                        <div className="flex justify-between py-2 border-b border-gray-700">
+                                                                            <span className="text-gray-400">Link</span>
+                                                                            <a href={crawlData.url} target="_blank" className="text-blue-400 hover:underline truncate max-w-[200px]">{crawlData.url}</a>
+                                                                        </div>
+                                                                        <div className="flex justify-between py-2 border-b border-gray-700">
+                                                                            <span className="text-gray-400">Domain Provider</span>
+                                                                            <span className="text-white">{crawlData.compliance_checks?.url_details?.domain_provider || 'Unknown'}</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between py-2 border-b border-gray-700">
+                                                                            <span className="text-gray-400">Registered On</span>
+                                                                            <span className="text-white">{crawlData.compliance_checks?.url_details?.domain_registered_on || 'Unknown'}</span>
+                                                                        </div>
+                                                                        <div className="flex justify-between py-2">
+                                                                            <span className="text-gray-400">Vintage Days</span>
+                                                                            <span className="text-white">{crawlData.compliance_checks?.url_details?.vintage_days || 'N/A'}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="bg-gray-800/50 rounded-lg p-6 border border-gray-700">
+                                                                    <h3 className="text-lg font-semibold text-white mb-4">SSL Certificate</h3>
+                                                                    <div className="space-y-3 text-sm">
+                                                                        <div className="flex justify-between py-2 border-b border-gray-700">
+                                                                            <span className="text-gray-400">Status</span>
+                                                                            <span className={crawlData.compliance_checks?.ssl_certificate?.valid ? "text-green-400" : "text-red-400"}>
+                                                                                {crawlData.compliance_checks?.ssl_certificate?.valid ? "Valid" : "Invalid"}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="flex justify-between py-2 border-b border-gray-700">
+                                                                            <span className="text-gray-400">Hostname</span>
+                                                                            <span className="text-white">{crawlData.compliance_checks?.ssl_certificate?.server_hostname || 'N/A'}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
 

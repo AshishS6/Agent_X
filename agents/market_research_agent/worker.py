@@ -102,11 +102,13 @@ def process_task(task_data: dict):
         return result
         
     except Exception as e:
-        logger.error(f"Error processing task: {str(e)}", exc_info=True)
+        logger.error(f"CRITICAL ERROR processing task {task_data.get('taskId')}: {str(e)}", exc_info=True)
         try:
-            update_task_status(task_data["taskId"], "failed", error=str(e))
-        except:
-            pass
+            # Try to update status if possible
+            if "taskId" in task_data:
+                update_task_status(task_data["taskId"], "failed", error=f"Internal Worker Error: {str(e)}")
+        except Exception as update_error:
+            logger.error(f"Failed to update task status after error: {update_error}")
         raise
 
 
@@ -167,8 +169,9 @@ def listen_for_tasks():
             logger.info("Worker shutting down...")
             break
         except Exception as e:
-            logger.error(f"Worker error: {e}", exc_info=True)
-            time.sleep(5)  # Wait before retrying
+            logger.error(f"Worker main loop error: {e}", exc_info=True)
+            time.sleep(5)  # Wait before retrying to avoid tight loop
+            logger.info("Restarting main loop...")
 
 
 if __name__ == "__main__":

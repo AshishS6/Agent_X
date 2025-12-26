@@ -140,7 +140,7 @@ export const MonitoringService = {
         const data = response.data.data;
         return {
             ...data,
-            recentActivity: (data.recentActivity || []).map(mapTaskFromApi)
+            recentActivity: (data.recentActivity?.tasks || []).map(mapTaskFromApi)
         };
     },
 

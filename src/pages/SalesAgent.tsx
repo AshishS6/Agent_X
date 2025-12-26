@@ -9,7 +9,7 @@ const SalesAgent = () => {
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
 
-    const [formState, setFormState] = useState({ action: 'generate_email', input: '' });
+
 
     // Fetch agent data
     useEffect(() => {
@@ -121,14 +121,12 @@ const SalesAgent = () => {
                     <h3 className="text-lg font-bold text-white mb-4">Execute Task</h3>
                     <TaskForm
                         agentId={agentId}
-                        formState={formState}
-                        setFormState={setFormState}
                         onTaskCreated={handleTaskCreated}
                     />
                 </div>
             </div>
         </div>
-    ), [metrics, tasks, agentId, formState, handleTaskCreated]);
+    ), [metrics, tasks, agentId, handleTaskCreated]);
 
     const conversationsContent = useMemo(() => (
         <div className="bg-gray-900 rounded-xl border border-gray-800 flex flex-col h-[600px]">
@@ -250,13 +248,12 @@ const SalesAgent = () => {
 // Task Execution Form Component
 interface TaskFormProps {
     agentId: string | null;
-    formState: { action: string; input: string };
-    setFormState: React.Dispatch<React.SetStateAction<{ action: string; input: string }>>;
     onTaskCreated: () => void;
 }
 
-const TaskForm = ({ agentId, formState, setFormState, onTaskCreated }: TaskFormProps) => {
-    const { action, input } = formState;
+const TaskForm = ({ agentId, onTaskCreated }: TaskFormProps) => {
+    const [action, setAction] = useState('generate_email');
+    const [input, setInput] = useState('');
     const [executing, setExecuting] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -279,7 +276,7 @@ const TaskForm = ({ agentId, formState, setFormState, onTaskCreated }: TaskFormP
             }
 
             await AgentService.execute(agentId, action, parsedInput);
-            setFormState(prev => ({ ...prev, input: '' }));
+            setInput(''); // Only clear input on success
             onTaskCreated();
         } catch (err) {
             console.error('Failed to execute task:', err);
@@ -294,7 +291,7 @@ const TaskForm = ({ agentId, formState, setFormState, onTaskCreated }: TaskFormP
                 <label className="block text-sm font-medium text-gray-400 mb-2">Action</label>
                 <select
                     value={action}
-                    onChange={(e) => setFormState(prev => ({ ...prev, action: e.target.value }))}
+                    onChange={(e) => setAction(e.target.value)}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                     <option value="generate_email">Generate Email</option>
@@ -305,7 +302,7 @@ const TaskForm = ({ agentId, formState, setFormState, onTaskCreated }: TaskFormP
                 <label className="block text-sm font-medium text-gray-400 mb-2">Input (JSON or Text)</label>
                 <textarea
                     value={input}
-                    onChange={(e) => setFormState(prev => ({ ...prev, input: e.target.value }))}
+                    onChange={(e) => setInput(e.target.value)}
                     placeholder={action === 'generate_email' ? 'Enter context for the email...' : 'Enter lead details...'}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent h-32 font-mono text-sm"
                 />
