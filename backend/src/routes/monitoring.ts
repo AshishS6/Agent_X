@@ -4,6 +4,7 @@ import { queueService } from '../services/queue.service';
 import { AgentModel } from '../models/Agent';
 import { TaskModel } from '../models/Task';
 import { ApiResponse } from '../types';
+import axios from 'axios';
 
 const router = Router();
 
@@ -60,7 +61,7 @@ router.get('/metrics', async (req: Request, res: Response<ApiResponse>) => {
         const total = totalCompleted + totalFailed;
         const efficiencyScore = total > 0
             ? ((totalCompleted / total) * 100).toFixed(1)
-            : 100;
+            : "100";
 
         const metrics = {
             activeAgents: {
@@ -100,7 +101,7 @@ router.get('/activity', async (req: Request, res: Response<ApiResponse>) => {
         const tasks = await TaskModel.findAll({ limit });
 
         // Format tasks as activity feed
-        const activity = tasks.map((task) => ({
+        const activity = tasks.tasks.map((task: any) => ({
             id: task.id,
             taskId: task.id,
             agentId: task.agentId,
@@ -117,6 +118,58 @@ router.get('/activity', async (req: Request, res: Response<ApiResponse>) => {
     } catch (error: any) {
         console.error('Error fetching activity:', error);
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * GET /api/monitoring/proxy - Proxy for site previews to bypass iframe blocking
+ */
+router.get('/proxy', async (req: Request, res: Response) => {
+    try {
+        const targetUrl = req.query.url as string;
+        if (!targetUrl) {
+            return res.status(400).send('URL is required');
+        }
+
+        console.log(`Proxying request for: ${targetUrl}`);
+
+        const response = await axios.get(targetUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            },
+            timeout: 10000,
+            validateStatus: () => true
+        });
+
+        let html = response.data;
+
+        // If it's not a string (e.g. binary), just send it as is or handle appropriately
+        if (typeof html !== 'string') {
+            return res.status(response.status).send(html);
+        }
+
+        // Inject <base> tag to fix relative links (CSS, JS, Images)
+        const baseUrl = new URL(targetUrl).origin;
+        const baseTag = `<base href="${baseUrl}/">`;
+
+        if (html.includes('<head>')) {
+            html = html.replace('<head>', `<head>\n    ${baseTag}`);
+        } else if (html.includes('<html>')) {
+            html = html.replace('<html>', `<html>\n<head>\n    ${baseTag}\n</head>`);
+        } else {
+            html = baseTag + html;
+        }
+
+        // Remove security headers that prevent iframe embedding
+        res.removeHeader('X-Frame-Options');
+        res.removeHeader('Content-Security-Policy');
+
+        // Set content type and send
+        res.set('Content-Type', 'text/html');
+        res.send(html);
+    } catch (error: any) {
+        console.error('Proxy error:', error);
+        res.status(500).send(`Failed to proxy site: ${error.message}`);
     }
 });
 

@@ -54,15 +54,13 @@ curl http://localhost:3001/api/monitoring/health
 
 ## Step 4: Start Agent Worker
 
+You can run either or both agents depending on your needs.
+
+### Option A: Sales Agent
+
 ```bash
 # In a new terminal window
-cd agents
-
-# Install Python dependencies (first time only)
-pip install -r requirements.txt
-
-# Start Sales Agent worker
-cd sales_agent
+cd agents/sales_agent
 python worker.py
 ```
 
@@ -72,24 +70,54 @@ Sales Agent Worker started, listening on tasks:sales
 Using LLM provider: openai
 ```
 
+### Option B: Market Research Agent
+
+```bash
+# In a new terminal window
+cd agents/market_research_agent
+python worker.py
+```
+
+You should see:
+```
+Market Research Agent Worker started, listening on tasks:market_research
+Using LLM provider: openai
+```
+
+> **Note**: Market Research Agent requires additional dependencies:
+> - `duckduckgo-search` (web search)
+> - `beautifulsoup4` (web scraping)
+> - `python-whois` (domain analysis)
+> 
+> These are included in `agents/requirements.txt`
+
 ## Step 5: Test the System
 
 ### Option A: Direct Agent Test (No Backend)
 
+**Sales Agent:**
 ```bash
-# In agents/sales_agent directory
+cd agents/sales_agent
 python test_agent.py
 ```
 
-This will generate a sample email and qualify a lead using the AI.
+**Market Research Agent:**
+```bash
+cd agents/market_research_agent
+python test_agent.py
+```
+
+These will test the agents directly using the LLM.
 
 ### Option B: Full Stack Test (API → Queue → Agent)
+
+**Test Sales Agent:**
 
 ```bash
 # 1. Get Sales Agent ID
 curl http://localhost:3001/api/agents | jq '.data[] | select(.type=="sales") | .id'
 
-# 2. Execute task (replace {agent-id} with actual ID)
+# 2. Execute email generation task (replace {agent-id})
 curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
   -H "Content-Type: application/json" \
   -d '{
@@ -101,21 +129,43 @@ curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
     "priority": "high"
   }'
 
-# Copy the task ID from response
-
-# 3. Watch worker logs (you should see it processing)
-
-# 4. Check task result (replace {task-id})
+# 3. Check task result (replace {task-id} from response)
 curl http://localhost:3001/api/tasks/{task-id}
 ```
 
-## Step 6: Explore the Database
+**Test Market Research Agent:**
 
 ```bash
-# Connect to PostgreSQL
-docker-compose exec postgres psql -U postgres -d agentx
+# 1. Get Market Research Agent ID
+curl http://localhost:3001/api/agents | jq '.data[] | select(.type=="market_research") | .id'
 
-# View agents
+# 2. Execute site scan (replace {agent-id})
+curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "comprehensive_site_scan",
+    "input": {
+      "url": "https://example.com",
+      "business_name": "Example Inc"
+    },
+    "priority": "high"
+  }'
+
+# 3. Execute web search (replace {agent-id})
+curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "search_web",
+    "input": {
+      "query": "artificial intelligence trends 2024",
+      "max_results": 5
+    }
+  }'
+
+# 4. Check task result
+curl http://localhost:3001/api/tasks/{task-id}
+```
+
 SELECT id, type, name, status FROM agents;
 
 # View recent tasks
@@ -125,16 +175,23 @@ SELECT id, action, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 
 \q
 ```
 
-## Step 7: Run Your Frontend
+## Step 6: Access the Frontend
 
 ```bash
-# In Agent_X root directory
+# In Agent_X root directory (new terminal)
+npm install  # First time only
 npm run dev
 ```
 
 Dashboard will open at http://localhost:5173
 
-> 🔴 **Note**: Frontend currently shows mock data. Phase 1 task remaining is to connect it to the backend APIs.
+**Active Pages:**
+- ✅ Dashboard Home - Real-time system metrics
+- ✅ Market Research Agent - Full functionality with site scan, crawler, search
+- ✅ Sales Agent - Email generation and lead qualification
+- ✅ Activity Logs - Live task execution history
+- ✅ Integrations - Integration management
+- 🔄 Other agent pages - UI only (backend not implemented)
 
 ---
 
@@ -174,18 +231,21 @@ docker-compose up -d    # Restart (will re-run schema.sql)
 ✅ Backend API with 9 agents configured  
 ✅ PostgreSQL database with schema  
 ✅ Redis message queue  
-✅ Sales Agent with LLM integration  
+✅ **Sales Agent** with LLM integration  
+✅ **Market Research Agent** with web search, crawling, site scanning  
 ✅ Task processing pipeline  
-✅ Email generation  
-✅ Lead qualification  
+✅ **Frontend-Backend Integration** for dashboard, agents, tasks  
+✅ Real-time monitoring and metrics  
+✅ Activity logs with live data  
+✅ Integration management  
 
 ## What's Next
 
 After verifying the system works:
 
-1. **Frontend Integration** - Connect React dashboard to APIs
-2. **WebSocket** - Add real-time updates
-3. **Phase 2** - Implement remaining 8 agents
+1. **Implement Remaining Agents** - Support, HR, Legal, Finance, Marketing, Intelligence, Lead Sourcing
+2. **WebSocket Integration** - Add real-time updates for task status
+3. **Advanced Features** - RAG, workflows, analytics
 
 ---
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Globe, Search, Plus, Loader, AlertCircle, FileText, CheckCircle, XCircle, AlertTriangle, Eye, Download, Shield, CreditCard, ShoppingBag, Building } from 'lucide-react';
+import { TrendingUp, Globe, Search, Plus, Loader, AlertCircle, FileText, CheckCircle, XCircle, AlertTriangle, Eye, Download, Shield, CreditCard, ShoppingBag, Building, ExternalLink } from 'lucide-react';
 import { AgentService, TaskService, Task, Agent } from '../services/api';
 
 const MarketResearchAgent = () => {
@@ -318,8 +318,6 @@ const MarketResearchAgent = () => {
                                     <option value="market_analysis">Market Analysis</option>
                                     <option value="competitor_research">Competitor Research</option>
                                     <option value="trend_monitoring">Trend Monitoring</option>
-                                    <option value="compliance_check">Compliance Check</option>
-                                    <option value="web_crawler">Web Crawler</option>
                                     <option value="site_scan">Site Scan (Comprehensive)</option>
                                 </select>
                             </div>
@@ -506,6 +504,7 @@ const MarketResearchAgent = () => {
 
                                 // Normalize data if needed
                                 const siteScan = crawlData.comprehensive_site_scan;
+                                const displayData = siteScan || crawlData;
 
                                 // Render Tabbed Interface for Crawler Results
                                 return (
@@ -540,6 +539,17 @@ const MarketResearchAgent = () => {
                                                     {/* NEW: Comprehensive Site Scan View */}
                                                     {siteScan ? (
                                                         <div className="space-y-6">
+                                                            {siteScan.error && (
+                                                                <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-2">
+                                                                    <div className="flex items-center gap-3 text-red-500">
+                                                                        <AlertCircle size={18} />
+                                                                        <div className="text-sm">
+                                                                            <span className="font-bold">Scan Error: </span>
+                                                                            {siteScan.error}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                             {/* General Compliance Status */}
                                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                                 {/* General */}
@@ -586,7 +596,23 @@ const MarketResearchAgent = () => {
                                                                     )}
 
                                                                     {siteScan.compliance?.general?.pass && !siteScan.compliance?.general?.alerts?.length && (
-                                                                        <p className="text-green-400">All general compliance checks passed.</p>
+                                                                        <div className="space-y-3">
+                                                                            <p className="text-green-400 font-medium pb-2 border-b border-green-500/20">All general compliance checks passed.</p>
+                                                                            <ul className="space-y-2 text-sm text-gray-300">
+                                                                                <li className="flex items-center gap-2">
+                                                                                    <CheckCircle size={14} className="text-green-400" />
+                                                                                    <span>Website is live and accessible (Status: 200)</span>
+                                                                                </li>
+                                                                                <li className="flex items-center gap-2">
+                                                                                    <CheckCircle size={14} className="text-green-400" />
+                                                                                    <span>SSL Certificate is valid (HTTPS)</span>
+                                                                                </li>
+                                                                                <li className="flex items-center gap-2">
+                                                                                    <CheckCircle size={14} className="text-green-400" />
+                                                                                    <span>Domain vintage meets requirements</span>
+                                                                                </li>
+                                                                            </ul>
+                                                                        </div>
                                                                     )}
                                                                 </div>
 
@@ -604,7 +630,23 @@ const MarketResearchAgent = () => {
                                                                     </div>
 
                                                                     {siteScan.compliance?.payment_terms?.pass ? (
-                                                                        <p className="text-green-400">Payment terms validate successfully.</p>
+                                                                        <div className="space-y-3">
+                                                                            <p className="text-green-400 font-medium pb-2 border-b border-green-500/20">Payment policies validate successfully.</p>
+                                                                            <ul className="space-y-2 text-sm text-gray-300">
+                                                                                <li className="flex items-center gap-2">
+                                                                                    <CheckCircle size={14} className="text-green-400" />
+                                                                                    <span>Refund/Return Policy detected</span>
+                                                                                </li>
+                                                                                <li className="flex items-center gap-2">
+                                                                                    <CheckCircle size={14} className="text-green-400" />
+                                                                                    <span>Terms & Conditions detected</span>
+                                                                                </li>
+                                                                                <li className="flex items-center gap-2">
+                                                                                    <CheckCircle size={14} className="text-green-400" />
+                                                                                    <span>Privacy Policy detected</span>
+                                                                                </li>
+                                                                            </ul>
+                                                                        </div>
                                                                     ) : (
                                                                         <p className="text-yellow-400">Review payment terms for potential issues.</p>
                                                                     )}
@@ -710,7 +752,7 @@ const MarketResearchAgent = () => {
                                             {activeTab === 'policy' && (
                                                 <div className="space-y-6">
                                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                        {Object.entries(crawlData.policy_details || {}).map(([key, value]: [string, any]) => (
+                                                        {Object.entries(displayData.policy_details || {}).map(([key, value]: [string, any]) => (
                                                             <div key={key} className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 flex flex-col justify-between">
                                                                 <div>
                                                                     <div className="flex items-center gap-2 mb-2">
@@ -743,7 +785,7 @@ const MarketResearchAgent = () => {
                                                 <div className="space-y-6">
                                                     {/* MCC Selection */}
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                        {[crawlData.mcc_codes?.primary_mcc, crawlData.mcc_codes?.secondary_mcc].filter(Boolean).map((mcc: any, idx: number) => (
+                                                        {[displayData.mcc_codes?.primary_mcc, displayData.mcc_codes?.secondary_mcc].filter(Boolean).map((mcc: any, idx: number) => (
                                                             <div key={idx} className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 relative overflow-hidden">
                                                                 <div className="flex items-start gap-3">
                                                                     <div className="mt-1">
@@ -762,23 +804,23 @@ const MarketResearchAgent = () => {
                                                     </div>
 
                                                     {/* Detailed Description */}
-                                                    {crawlData.mcc_codes?.primary_mcc && (
+                                                    {displayData.mcc_codes?.primary_mcc && (
                                                         <div className="bg-white text-gray-900 rounded-lg p-6 border border-gray-200">
                                                             <div className="flex items-center gap-3 mb-4">
                                                                 <div className="w-4 h-4 rounded-full border-[5px] border-blue-600"></div>
-                                                                <h3 className="text-lg font-bold">{crawlData.mcc_codes.primary_mcc.mcc_code} - {crawlData.mcc_codes.primary_mcc.description}</h3>
+                                                                <h3 className="text-lg font-bold">{displayData.mcc_codes.primary_mcc.mcc_code} - {displayData.mcc_codes.primary_mcc.description}</h3>
                                                             </div>
 
                                                             <div className="grid grid-cols-[150px_1fr] gap-y-4 text-sm">
                                                                 <div className="text-gray-500 font-medium">Category</div>
-                                                                <div className="font-medium">{crawlData.mcc_codes.primary_mcc.category || 'Retail'}</div>
+                                                                <div className="font-medium">{displayData.mcc_codes.primary_mcc.category || 'Retail'}</div>
 
                                                                 <div className="text-gray-500 font-medium">Subcategory</div>
-                                                                <div className="font-medium">{crawlData.mcc_codes.primary_mcc.subcategory || 'General'}</div>
+                                                                <div className="font-medium">{displayData.mcc_codes.primary_mcc.subcategory || 'General'}</div>
 
                                                                 <div className="text-gray-500 font-medium">Description</div>
                                                                 <div className="text-gray-700">
-                                                                    Merchants classified with this MCC sell {crawlData.mcc_codes.primary_mcc.description.toLowerCase()}.
+                                                                    Merchants classified with this MCC sell {displayData.mcc_codes.primary_mcc.description.toLowerCase()}.
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -796,13 +838,101 @@ const MarketResearchAgent = () => {
 
                                             {activeTab === 'product' && (
                                                 <div className="space-y-6">
-                                                    <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
-                                                        <h3 className="text-lg font-semibold text-white mb-4">Product Analysis</h3>
-                                                        <div className="grid grid-cols-2 gap-4">
-                                                            {Object.entries(crawlData.product_details || {}).map(([key, value]) => (
-                                                                <div key={key} className="flex items-center justify-between p-3 bg-gray-900/50 rounded">
-                                                                    <span className="text-gray-400 capitalize">{key.replace(/_/g, ' ')}</span>
-                                                                    <span className={value ? "text-green-400" : "text-gray-500"}>{value ? "Detected" : "Not Found"}</span>
+                                                    {/* Summary Cards */}
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-5 flex items-start gap-4">
+                                                            <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 flex-shrink-0">
+                                                                <CreditCard size={20} />
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pricing Model</label>
+                                                                <p className="text-lg font-bold text-white mt-1">{displayData.product_details?.pricing_model || 'Not identified'}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-5 flex items-start gap-4">
+                                                            <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 flex-shrink-0">
+                                                                <Building size={20} />
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Target Audience</label>
+                                                                <p className="text-lg font-bold text-white mt-1">{displayData.product_details?.target_audience || 'General'}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Extracted Product List */}
+                                                    <div className="bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden">
+                                                        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+                                                            <h3 className="font-bold text-white flex items-center gap-2">
+                                                                <ShoppingBag size={18} className="text-blue-400" />
+                                                                Products & Services
+                                                            </h3>
+                                                            <div className="flex gap-2">
+                                                                {displayData.product_details?.source_pages?.product_page && (
+                                                                    <button
+                                                                        onClick={() => { setPreviewUrl(displayData.product_details.source_pages.product_page); setIsPreviewOpen(true); }}
+                                                                        className="text-[10px] px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded flex items-center gap-1 transition-colors"
+                                                                    >
+                                                                        <Eye size={10} /> Product Page
+                                                                    </button>
+                                                                )}
+                                                                {displayData.product_details?.source_pages?.pricing_page && (
+                                                                    <button
+                                                                        onClick={() => { setPreviewUrl(displayData.product_details.source_pages.pricing_page); setIsPreviewOpen(true); }}
+                                                                        className="text-[10px] px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded flex items-center gap-1 transition-colors"
+                                                                    >
+                                                                        <Eye size={10} /> Pricing Page
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {displayData.product_details?.extracted_products?.length > 0 ? (
+                                                            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                {displayData.product_details.extracted_products.map((product: any, idx: number) => (
+                                                                    <div key={idx} className="bg-gray-900/40 border border-gray-700/50 rounded-lg p-4 hover:border-blue-500/30 transition-colors">
+                                                                        <div className="flex justify-between items-start mb-2">
+                                                                            <h4 className="font-bold text-blue-400">{product.name}</h4>
+                                                                            {product.price_if_found && (
+                                                                                <span className="text-xs font-bold text-green-400 bg-green-400/10 px-2 py-0.5 rounded">
+                                                                                    {product.price_if_found}
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        <p className="text-sm text-gray-400 leading-relaxed">
+                                                                            {product.brief_description}
+                                                                        </p>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="p-12 text-center">
+                                                                <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-700">
+                                                                    <Search size={24} className="text-gray-600" />
+                                                                </div>
+                                                                <p className="text-gray-500">No specific products were extracted from the main pages.</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Audit Indicators */}
+                                                    <div className="bg-gray-800/30 border border-gray-700/50 rounded-lg p-6">
+                                                        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Quick Audit Analysis</h4>
+                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                            {[
+                                                                { label: 'Products', val: displayData.product_details?.has_products },
+                                                                { label: 'Pricing', val: displayData.product_details?.has_pricing },
+                                                                { label: 'Checkout', val: displayData.product_details?.has_cart },
+                                                                { label: 'E-commerce', val: displayData.product_details?.ecommerce_platform }
+                                                            ].map((item, idx) => (
+                                                                <div key={idx} className="flex flex-col gap-1">
+                                                                    <span className="text-[10px] text-gray-500 uppercase tracking-tighter">{item.label}</span>
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        {item.val ? <CheckCircle size={14} className="text-green-500" /> : <XCircle size={14} className="text-gray-600" />}
+                                                                        <span className={`text-xs font-medium ${item.val ? 'text-gray-300' : 'text-gray-500'}`}>
+                                                                            {item.val ? 'Detected' : 'Not Found'}
+                                                                        </span>
+                                                                    </div>
                                                                 </div>
                                                             ))}
                                                         </div>
@@ -813,11 +943,107 @@ const MarketResearchAgent = () => {
                                             {activeTab === 'business' && (
                                                 <div className="space-y-6">
                                                     <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
-                                                        <h3 className="text-lg font-semibold text-white mb-4">Business Information</h3>
-                                                        <div className="space-y-4">
-                                                            <div>
-                                                                <label className="text-sm text-gray-500">Extracted Business Name</label>
-                                                                <p className="text-lg text-white">{crawlData.business_details?.extracted_business_name || 'Not found'}</p>
+                                                        <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
+                                                            <Building className="text-blue-400" size={20} />
+                                                            Business Information
+                                                        </h3>
+
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                                            <div className="space-y-6">
+                                                                <div>
+                                                                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Business Name</label>
+                                                                    <p className="text-xl font-bold text-white mt-1">{displayData.business_details?.extracted_business_name || 'Not found'}</p>
+                                                                </div>
+
+                                                                <div>
+                                                                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Company Summary</label>
+                                                                    <p className="text-sm text-gray-300 mt-2 leading-relaxed bg-black/20 p-4 rounded-lg border border-gray-700/50">
+                                                                        {displayData.business_details?.company_summary || 'No summary available.'}
+                                                                    </p>
+                                                                </div>
+
+                                                                <div>
+                                                                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Mission & Vision</label>
+                                                                    <p className="text-sm italic text-gray-400 mt-2 border-l-2 border-blue-500/50 pl-4 py-1">
+                                                                        {displayData.business_details?.mission_vision || 'Mission/Vision statement not found.'}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="space-y-6">
+                                                                <div>
+                                                                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Key Offerings</label>
+                                                                    <p className="text-sm text-white mt-2 bg-blue-500/10 p-4 rounded-lg border border-blue-500/20">
+                                                                        {displayData.business_details?.key_offerings || 'Product/Service details not found.'}
+                                                                    </p>
+                                                                </div>
+
+                                                                <div>
+                                                                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 block">Contact Information</label>
+                                                                    <div className="space-y-3">
+                                                                        <div className="flex items-center gap-3 text-sm">
+                                                                            <div className="w-8 h-8 rounded bg-gray-700/50 flex items-center justify-center text-gray-400">
+                                                                                <Globe size={14} />
+                                                                            </div>
+                                                                            <span className="text-gray-300">{displayData.business_details?.contact_info?.email || 'Email not found'}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-3 text-sm">
+                                                                            <div className="w-8 h-8 rounded bg-gray-700/50 flex items-center justify-center text-gray-400">
+                                                                                <Plus size={14} />
+                                                                            </div>
+                                                                            <span className="text-gray-300">{displayData.business_details?.contact_info?.phone || 'Phone not found'}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-3 text-sm">
+                                                                            <div className="w-8 h-8 rounded bg-gray-700/50 flex items-center justify-center text-gray-400">
+                                                                                <Building size={14} />
+                                                                            </div>
+                                                                            <span className="text-gray-300">{displayData.business_details?.contact_info?.address || 'Address not found'}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Sources & Verification Section */}
+                                                        <div className="mt-10 pt-6 border-t border-gray-700/50">
+                                                            <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                                                <Globe size={14} />
+                                                                Sources & Verification
+                                                            </h4>
+                                                            <div className="flex flex-wrap gap-4">
+                                                                {displayData.business_details?.source_urls?.home && (
+                                                                    <a
+                                                                        href={displayData.business_details.source_urls.home}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-xs text-blue-400 transition-colors border border-gray-700"
+                                                                    >
+                                                                        Home Page
+                                                                        <ExternalLink size={12} />
+                                                                    </a>
+                                                                )}
+                                                                {displayData.business_details?.source_urls?.about_us && (
+                                                                    <a
+                                                                        href={displayData.business_details.source_urls.about_us}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-xs text-blue-400 transition-colors border border-gray-700"
+                                                                    >
+                                                                        About Us
+                                                                        <ExternalLink size={12} />
+                                                                    </a>
+                                                                )}
+                                                                {displayData.business_details?.source_urls?.contact_us && (
+                                                                    <a
+                                                                        href={displayData.business_details.source_urls.contact_us}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-md text-xs text-blue-400 transition-colors border border-gray-700"
+                                                                    >
+                                                                        Contact Us
+                                                                        <ExternalLink size={12} />
+                                                                    </a>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -856,9 +1082,20 @@ const MarketResearchAgent = () => {
                         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
                             <div className="bg-white w-full max-w-5xl h-[85vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
                                 <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
-                                    <div className="flex items-center gap-2">
-                                        <h3 className="font-bold text-gray-800">Preview Site</h3>
-                                        <span className="text-sm text-gray-500 px-2 py-0.5 bg-gray-200 rounded">{previewUrl}</span>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="font-bold text-gray-800">Preview Site</h3>
+                                            <span className="text-sm text-gray-500 px-2 py-0.5 bg-gray-200 rounded truncate max-w-[300px]">{previewUrl}</span>
+                                        </div>
+                                        <a
+                                            href={previewUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded transition-colors"
+                                        >
+                                            <ExternalLink size={12} />
+                                            Open in New Tab
+                                        </a>
                                     </div>
                                     <button onClick={() => setIsPreviewOpen(false)} className="text-gray-500 hover:text-gray-800">
                                         <XCircle size={24} />
@@ -866,14 +1103,27 @@ const MarketResearchAgent = () => {
                                 </div>
                                 <div className="flex-1 bg-gray-100 relative">
                                     <iframe
-                                        src={previewUrl}
+                                        src={`http://localhost:3001/api/monitoring/proxy?url=${encodeURIComponent(previewUrl)}`}
                                         className="w-full h-full border-0"
                                         title="Site Preview"
                                         sandbox="allow-same-origin allow-scripts"
                                     />
-                                    {/* Overlay for sites that block iframes */}
-                                    <div className="absolute top-0 left-0 w-full h-full pointer-events-none flex items-center justify-center bg-gray-100/50 -z-10">
-                                        <p className="text-gray-500">Loading preview...</p>
+                                    {/* Troubleshooting info for blocked iframes */}
+                                    <div className="absolute inset-0 -z-10 flex flex-col items-center justify-center p-8 text-center bg-gray-50">
+                                        <AlertTriangle size={48} className="text-yellow-500 mb-4" />
+                                        <h4 className="text-lg font-bold text-gray-800 mb-2">Preview Blocked by Site</h4>
+                                        <p className="text-gray-600 max-w-md mb-6">
+                                            Some websites (like Razorpay) prevent themselves from being embedded for security reasons.
+                                        </p>
+                                        <a
+                                            href={previewUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="px-6 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-lg transition-colors flex items-center gap-2"
+                                        >
+                                            <ExternalLink size={16} />
+                                            Open in Browser to View
+                                        </a>
                                     </div>
                                 </div>
                             </div>

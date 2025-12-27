@@ -1,0 +1,195 @@
+/Users/ashish/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/ashish/Agent_X/agents/market_research_agent/debug_scan.py:292: DeprecationWarning: The 'text' argument to find()-type methods is deprecated. Use 'string' instead.
+  copyright = footer.find(text=re.compile(r'©|\(c\)|copyright', re.I))
+[INFO] Starting comprehensive scan for: https://www.opencapital.co.in/
+[INFO] Checking WHOIS for domain: www.opencapital.co.in
+{
+  "comprehensive_site_scan": {
+    "url": "https://www.opencapital.co.in/",
+    "business_name": "",
+    "scan_timestamp": "2025-12-28T00:22:12.143159",
+    "compliance_checks": {},
+    "policy_details": {
+      "home_page": {
+        "found": true,
+        "url": "https://www.opencapital.co.in/",
+        "status": "Home Page page is available"
+      },
+      "privacy_policy": {
+        "found": true,
+        "url": "https://www.opencapital.co.in/privacy",
+        "status": "Privacy Policy page is available"
+      },
+      "shipping_delivery": {
+        "found": false,
+        "url": "",
+        "status": ""
+      },
+      "returns_refund": {
+        "found": false,
+        "url": "",
+        "status": ""
+      },
+      "terms_condition": {
+        "found": true,
+        "url": "https://www.opencapital.co.in/experian",
+        "status": "Terms Condition page is available"
+      },
+      "contact_us": {
+        "found": true,
+        "url": "https://form.typeform.com/to/sZWNYniP",
+        "status": "Contact Us page is available"
+      },
+      "about_us": {
+        "found": true,
+        "url": "https://open.money/about-us",
+        "status": "About Us page is available"
+      },
+      "faq": {
+        "found": false,
+        "url": "",
+        "status": ""
+      },
+      "product": {
+        "found": false,
+        "url": "",
+        "status": ""
+      }
+    },
+    "mcc_codes": {
+      "primary_mcc": {
+        "category": "Retail",
+        "subcategory": "Groceries & Food",
+        "mcc_code": "5411",
+        "description": "Grocery Stores, Supermarkets",
+        "confidence": 45,
+        "keywords_matched": 3
+      },
+      "secondary_mcc": {
+        "category": "Retail",
+        "subcategory": "Fashion & Clothing",
+        "mcc_code": "5611",
+        "description": "Men's and Boy's Clothing and Accessories Stores",
+        "confidence": 30,
+        "keywords_matched": 2
+      },
+      "all_matches": [
+        {
+          "category": "Retail",
+          "subcategory": "Groceries & Food",
+          "mcc_code": "5411",
+          "description": "Grocery Stores, Supermarkets",
+          "confidence": 45,
+          "keywords_matched": 3
+        },
+        {
+          "category": "Retail",
+          "subcategory": "Fashion & Clothing",
+          "mcc_code": "5611",
+          "description": "Men's and Boy's Clothing and Accessories Stores",
+          "confidence": 30,
+          "keywords_matched": 2
+        },
+        {
+          "category": "Travel & Entertainment",
+          "subcategory": "Dining",
+          "mcc_code": "5812",
+          "description": "Eating places and Restaurants",
+          "confidence": 30,
+          "keywords_matched": 2
+        },
+        {
+          "category": "Retail",
+          "subcategory": "Fashion & Clothing",
+          "mcc_code": "5621",
+          "description": "Women's Ready-to-Wear Stores",
+          "confidence": 15,
+          "keywords_matched": 1
+        },
+        {
+          "category": "Retail",
+          "subcategory": "Groceries & Food",
+          "mcc_code": "5499",
+          "description": "Misc. Food Stores - Convenience Stores",
+          "confidence": 15,
+          "keywords_matched": 1
+        },
+        {
+          "category": "Retail",
+          "subcategory": "Electronics & Appliances",
+          "mcc_code": "5732",
+          "description": "Electronics Stores",
+          "confidence": 15,
+          "keywords_matched": 1
+        },
+        {
+          "category": "Retail",
+          "subcategory": "Home & Garden",
+          "mcc_code": "5712",
+          "description": "Furniture, Home Furnishings, and Equipment Stores",
+          "confidence": 15,
+          "keywords_matched": 1
+        },
+        {
+          "category": "Services",
+          "subcategory": "Professional Services",
+          "mcc_code": "8999",
+          "description": "Professional Services (Not Elsewhere Classified)",
+          "confidence": 15,
+          "keywords_matched": 1
+        },
+        {
+          "category": "Services",
+          "subcategory": "Health & Beauty",
+          "mcc_code": "8099",
+          "description": "Medical Services and Health Practitioners (Not Elsewhere Classified)",
+          "confidence": 15,
+          "keywords_matched": 1
+        },
+        {
+          "category": "Travel & Entertainment",
+          "subcategory": "Travel",
+          "mcc_code": "4722",
+          "description": "Travel Agencies and Tour Operators",
+          "confidence": 15,
+          "keywords_matched": 1
+        }
+      ]
+    },
+    "product_details": {
+      "has_products": true,
+      "has_pricing": true,
+      "has_cart": false,
+      "ecommerce_platform": false
+    },
+    "business_details": {
+      "extracted_business_name": "Open Capital"
+    },
+    "compliance": {
+      "general": {
+        "pass": true,
+        "alerts": [],
+        "actions_needed": []
+      },
+      "payment_terms": {
+        "pass": false,
+        "alerts": [],
+        "actions_needed": [
+          {
+            "description": "Refund/Return Policy is missing. Please add a clear Refund Policy page."
+          },
+          {
+            "description": "Shipping Policy is recommended for e-commerce sites."
+          }
+        ]
+      }
+    },
+    "content_risk": {
+      "dummy_words_detected": false,
+      "dummy_words": [],
+      "restricted_keywords_found": [],
+      "risk_score": 0
+    }
+  }
+}

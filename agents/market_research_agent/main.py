@@ -307,76 +307,98 @@ class MarketResearchAgent(BaseAgent):
                     domain = parsed_url.netloc or parsed_url.path
                     
                     # ===========================================
-                    # 1. COMPLIANCE CHECKS
+                    # 1. COMPLIANCE CHECKS & ALERTS
                     # ===========================================
                     
-                    compliance = {
-                        "liveness": {"status": "unknown", "message": ""},
-                        "redirection": {"status": "unknown", "redirects": [], "message": ""},
-                        "vintage": {"status": "unknown", "age_days": 0, "message": ""},
-                        "url_details": {},
-                        "ssl_certificate": {}
+                    # New Schema for Frontend "Enhanced Report"
+                    compliance_data = {
+                        "general": {
+                            "pass": True,
+                            "alerts": [],
+                            "actions_needed": []
+                        },
+                        "payment_terms": {
+                            "pass": False, # Will be updated based on policy checks
+                            "alerts": [],
+                            "actions_needed": []
+                        }
                     }
                     
                     # Check Liveness
                     try:
                         headers = {'User-Agent': 'Agent_X_ComplianceScanner/1.0'}
                         response = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
-                        
-                        if response.status_code == 200:
-                            compliance["liveness"] = {
-                                "status": "pass",
-                                "message": "The website is live and fully operational."
-                            }
-                        else:
-                            compliance["liveness"] = {
-                                "status": "fail",
-                                "message": f"Website returned status code {response.status_code}"
-                            }
-                        
-                        # Check Redirections
-                        if len(response.history) > 0:
-                            redirects = [{"from": r.url, "to": r.headers.get('Location', ''), "status": r.status_code} 
-                                       for r in response.history]
-                            compliance["redirection"] = {
-                                "status": "warning" if len(redirects) > 1 else "info",
-                                "redirects": redirects,
-                                "message": f"{len(redirects)} redirect(s) detected." if len(redirects) > 0 else "No redirection is detected."
-                            }
-                        else:
-                            compliance["redirection"] = {
-                                "status": "pass",
-                                "redirects": [],
-                                "message": "No redirection is detected."
-                            }
-                        
                         final_url = response.url
                         
+                        if response.status_code != 200:
+                            compliance_data["general"]["pass"] = False
+                            compliance_data["general"]["alerts"].append({
+                                "code": "LIVENESS_FAIL",
+                                "type": "Availability",
+                                "description": f"Website returned status code {response.status_code}"
+                            })
+                            compliance_data["general"]["actions_needed"].append({
+                                "description": "Ensure website is publicly accessible and returning 200 OK."
+                            })
+                            
                     except Exception as e:
-                        compliance["liveness"] = {
-                            "status": "fail",
-                            "message": f"Failed to connect: {str(e)}"
-                        }
+                        compliance_data["general"]["pass"] = False
+                        compliance_data["general"]["alerts"].append({
+                            "code": "CONNECTION_FAIL",
+                            "type": "Connectivity",
+                            "description": f"Failed to connect: {str(e)}"
+                        })
+                         # If we can't connect, likely everything else will fail too
                         final_url = url
+
+                    # Check Redirections
+                    if len(response.history) > 1:
+                         compliance_data["general"]["alerts"].append({
+                            "code": "EXCESSIVE_REDIRECTS",
+                            "type": "Performance",
+                            "description": f"{len(response.history)} redirects detected."
+                        })
+
+                    # Check SSL Certificate
+                    try:
+                        if parsed_url.scheme == 'https':
+                            context = ssl.create_default_context()
+                            with socket.create_connection((domain, 443), timeout=5) as sock:
+                                with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                                    cert = ssock.getpeercert()
+                                    # Basic validation passed if no exception
+                        else:
+                            compliance_data["general"]["pass"] = False
+                            compliance_data["general"]["alerts"].append({
+                                "code": "NO_HTTPS",
+                                "type": "Security",
+                                "description": "Website does not use HTTPS."
+                            })
+                            compliance_data["general"]["actions_needed"].append({
+                                "description": "Install an SSL certificate and enforce HTTPS."
+                            })
+                    except Exception as e:
+                        compliance_data["general"]["pass"] = False
+                        compliance_data["general"]["alerts"].append({
+                             "code": "SSL_ERROR",
+                             "type": "Security",
+                             "description": f"SSL Handshake failed: {str(e)}"
+                        })
+                        compliance_data["general"]["actions_needed"].append({
+                            "description": "Verify SSL certificate validity."
+                        })
                     
                     # Check Domain Age (Vintage)
                     try:
                         self.logger.info(f"Checking WHOIS for domain: {domain}")
                         w = whois.whois(domain)
-                        
-                        domain_provider = w.get('registrar', 'Unknown')
                         creation_date = w.get('creation_date')
-                        expiration_date = w.get('expiration_date')
                         
-                        # Handle list or single date
+                         # Handle list or single date
                         if isinstance(creation_date, list):
                             creation_date = creation_date[0]
-                        if isinstance(expiration_date, list):
-                            expiration_date = expiration_date[0]
-                        
-                        age_days = 0
+                            
                         if creation_date:
-                            # Handle timezone awareness
                             if creation_date.tzinfo:
                                 now = datetime.now(creation_date.tzinfo)
                             else:
@@ -385,68 +407,32 @@ class MarketResearchAgent(BaseAgent):
                             age_days = (now - creation_date).days
                             
                             if age_days < 365:
-                                compliance["vintage"] = {
-                                    "status": "warning",
-                                    "age_days": age_days,
-                                    "message": "The Age of the website is less than 1 year."
-                                }
-                            else:
-                                compliance["vintage"] = {
-                                    "status": "pass",
-                                    "age_days": age_days,
-                                    "message": f"Domain is {age_days} days old."
-                                }
-                        
-                        compliance["url_details"] = {
-                            "link": url,
-                            "redirected_link": final_url,
-                            "domain_provider": domain_provider,
-                            "domain_registered_on": creation_date.strftime("%Y-%m-%d") if creation_date else "Unknown",
-                            "domain_expires_on": expiration_date.strftime("%Y-%m-%d") if expiration_date else "Unknown",
-                            "vintage_days": age_days
-                        }
-                        
+                                compliance_data["general"]["alerts"].append({
+                                    "code": "LOW_VINTAGE",
+                                    "type": "Risk",
+                                    "description": f"Domain is only {age_days} days old (less than 1 year)."
+                                })
+                        else:
+                             # WHOIS often fails or returns None for hidden domains, treats as Warning not Fail
+                             pass
+                                
                     except Exception as e:
                         self.logger.warning(f"WHOIS lookup failed: {e}")
-                        compliance["vintage"] = {
-                            "status": "unknown",
-                            "age_days": 0,
-                            "message": "Unable to determine domain age."
-                        }
-                        compliance["url_details"] = {
-                            "link": url,
-                            "redirected_link": final_url,
-                            "domain_provider": "Unknown",
-                            "domain_registered_on": "Unknown",
-                            "domain_expires_on": "Unknown",
-                            "vintage_days": 0
-                        }
                     
-                    # Check SSL Certificate
-                    try:
-                        if parsed_url.scheme == 'https':
-                            context = ssl.create_default_context()
-                            with socket.create_connection((domain, 443), timeout=5) as sock:
-                                with context.wrap_socket(sock, server_hostname=domain) as ssock:
-                                    cert = ssock.getpeercert()
-                                    
-                                    compliance["ssl_certificate"] = {
-                                        "valid": True,
-                                        "server_hostname": domain,
-                                        "dns_names": cert.get('subjectAltName', [])
-                                    }
-                        else:
-                            compliance["ssl_certificate"] = {
-                                "valid": False,
-                                "message": "Website does not use HTTPS"
-                            }
-                    except Exception as e:
-                        compliance["ssl_certificate"] = {
-                            "valid": False,
-                            "error": str(e)
-                        }
+                    report["compliance_checks"] = compliance_data # Legacy key for existing consumers? 
+                    # THE FRONTEND uses 'compliance_checks' BUT checks for nested 'general' or 'payment_terms' inside it in the new view. 
+                    # Wait, looking at frontend code:
+                    # const siteScan = crawlData.comprehensive_site_scan;
+                    # siteScan.compliance?.general?.pass
+                    # So the report structure should be:
+                    # report = { ... "compliance": { "general": ... } }  <-- Note key is "compliance" in frontend specific view
+                    # But the variable initialized in line 299 as "compliance_checks".
+                    # Let's add BOTH to be safe, or rename. 
                     
-                    report["compliance_checks"] = compliance
+                    report["compliance"] = compliance_data
+                    report["compliance_checks"] = compliance_data # Keep legacy structure populated above for backward compat if needed? 
+                    # Actually, let's just make sure "compliance" key exists as that's what `siteScan.compliance` expects.
+
                     
                     # ===========================================
                     # 2. CRAWL WEBSITE FOR POLICY & CONTENT
@@ -465,6 +451,9 @@ class MarketResearchAgent(BaseAgent):
                             link_text = a.get_text(strip=True).lower()
                             all_links.append({"url": full_url, "text": link_text})
                         
+                        # Extract text once for all analyses
+                        page_text = soup.get_text(separator=' ', strip=True).lower()
+                        
                         # ===========================================
                         # 3. POLICY PAGE DETECTION
                         # ===========================================
@@ -478,7 +467,8 @@ class MarketResearchAgent(BaseAgent):
                             "contact_us": {"found": False, "url": "", "status": ""},
                             "about_us": {"found": False, "url": "", "status": ""},
                             "faq": {"found": False, "url": "", "status": ""},
-                            "product": {"found": False, "url": "", "status": ""}
+                            "product": {"found": False, "url": "", "status": ""},
+                            "pricing": {"found": False, "url": "", "status": ""}
                         }
                         
                         # Home page is available by default
@@ -506,13 +496,16 @@ class MarketResearchAgent(BaseAgent):
                                 r'contact[-_]?us', r'contact', r'support'
                             ],
                             "about_us": [
-                                r'about[-_]?us', r'about', r'who[-_]?we[-_]?are'
+                                r'about[-_]?us', r'about', r'who[-_]?we[-_]?are', r'company'
                             ],
                             "faq": [
                                 r'faq', r'frequently[-_]?asked', r'help'
                             ],
                             "product": [
-                                r'products?', r'shop', r'store', r'catalog'
+                                r'products?', r'shop', r'store', r'catalog', r'solutions?'
+                            ],
+                            "pricing": [
+                                r'pricing', r'plans', r'subscription', r'fees'
                             ]
                         }
                         
@@ -534,28 +527,167 @@ class MarketResearchAgent(BaseAgent):
                         
                         report["policy_details"] = policy_pages
                         
+                        # Logic to update Payment Terms status based on found policies
+                        has_returns = policy_pages["returns_refund"]["found"]
+                        has_terms = policy_pages["terms_condition"]["found"]
+                        has_shipping = policy_pages["shipping_delivery"]["found"]
+                        
+                        if has_returns and has_terms:
+                            compliance_data["payment_terms"]["pass"] = True
+                        else:
+                            compliance_data["payment_terms"]["pass"] = False
+                            if not has_returns:
+                                compliance_data["payment_terms"]["actions_needed"].append({
+                                    "description": "Refund/Return Policy is missing. Please add a clear Refund Policy page."
+                                })
+                            if not has_terms:
+                                compliance_data["payment_terms"]["actions_needed"].append({
+                                    "description": "Terms & Conditions are missing. Please add a Terms of Service page."
+                                })
+                            if not has_shipping and "product" in page_text: # Only if it looks like a shop
+                                 compliance_data["payment_terms"]["actions_needed"].append({
+                                    "description": "Shipping Policy is recommended for e-commerce sites."
+                                })
+
+                        # Update the compliance object in report
+                        report["compliance"] = compliance_data
+                        
                         # ===========================================
-                        # 4. BUSINESS NAME EXTRACTION
+                        # 4. BUSINESS NAME & DETAILS EXTRACTION
                         # ===========================================
                         
+                        business_info = {
+                            "extracted_business_name": business_name,
+                            "company_summary": "Not found",
+                            "mission_vision": "Not found",
+                            "key_offerings": "Not found",
+                            "source_urls": {
+                                "about_us": policy_pages["about_us"]["url"] if policy_pages["about_us"]["found"] else None,
+                                "contact_us": policy_pages["contact_us"]["url"] if policy_pages["contact_us"]["found"] else None,
+                                "home": final_url
+                            },
+                            "contact_info": {
+                                "email": "Not found",
+                                "phone": "Not found",
+                                "address": "Not found"
+                            }
+                        }
+
+                        # Function to fetch and clean text from a page with better headers
+                        def get_clean_page_text(page_url):
+                            try:
+                                browser_headers = {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                                    'Accept-Language': 'en-US,en;q=0.9',
+                                }
+                                p_resp = requests.get(page_url, headers=browser_headers, timeout=10)
+                                if p_resp.status_code == 200:
+                                    p_soup = BeautifulSoup(p_resp.content, 'html.parser')
+                                    for el in p_soup(["script", "style", "nav", "footer", "header", "aside"]):
+                                        el.decompose()
+                                    return p_soup.get_text(separator=' ', strip=True)
+                                else:
+                                    self.logger.warning(f"Failed to fetch {page_url}: Status {p_resp.status_code}")
+                            except Exception as e:
+                                self.logger.warning(f"Error fetching {page_url}: {e}")
+                            return ""
+
+                        # 4.1 Extract Business Name if not provided
                         if not business_name:
                             # Try to extract from footer, about, or copyright
                             footer = soup.find('footer')
                             if footer:
-                                copyright = footer.find(text=re.compile(r'©|\(c\)|copyright', re.I))
-                                if copyright:
+                                copyright_item = footer.find(text=re.compile(r'©|\(c\)|copyright', re.I))
+                                if copyright_item:
                                     # Extract company name from copyright text
-                                    match = re.search(r'(?:©|\(c\)|copyright)\s*(?:\\d{4})?\s*([A-Z][\\w\\s&,.-]+)', copyright, re.I)
+                                    match = re.search(r'(?:©|\(c\)|copyright)\s*(?:\d{4})?\s*([A-Z][\w\s&,.-]+)', copyright_item, re.I)
                                     if match:
                                         business_name = match.group(1).strip()
+                            
+                            # Fallback: Check title
+                            if not business_name and soup.title:
+                                # Often title is "Brand Name - Tagline"
+                                title_str = soup.title.string or ""
+                                title_parts = title_str.split('-')
+                                if title_parts:
+                                    business_name = title_parts[0].strip()
+                            
+                            # Fallback: Check for meta og:site_name
+                            if not business_name:
+                                og_site_name = soup.find("meta", property="og:site_name")
+                                if og_site_name:
+                                    business_name = og_site_name.get("content", "").strip()
                         
-                        report["business_details"]["extracted_business_name"] = business_name
+                        business_info["extracted_business_name"] = business_name or "Not found"
+
+                        # 4.2 Visit About Us page for summary and offerings
+                        if policy_pages["about_us"]["found"]:
+                            self.logger.info(f"Visiting About Us for details: {policy_pages['about_us']['url']}")
+                            about_text = get_clean_page_text(policy_pages["about_us"]["url"])
+                            if about_text:
+                                # Simple extraction (can be improved with LLM later if needed)
+                                business_info["company_summary"] = about_text[:1000] + "..." if len(about_text) > 1000 else about_text
+                                
+                                # Try to find Mission/Vision with more patterns
+                                mv_patterns = [
+                                    r'(?:mission|vision|our\s+goal|purpose)\s*:?\s*([^.!?]{20,500}[.!?])',
+                                    r'(?:strive\s+to|aim\s+to|committed\s+to)\s+([^.!?]{20,500}[.!?])'
+                                ]
+                                for mv_p in mv_patterns:
+                                    mv_match = re.search(mv_p, about_text, re.I)
+                                    if mv_match:
+                                        business_info["mission_vision"] = mv_match.group(1).strip()
+                                        break
+                                
+                                # Try to find offerings with more patterns
+                                off_patterns = [
+                                    r'(?:offerings|services|products|solutions|we\s+provide|features)\s*(?:include|are|offer)\s*:?\s*([^.!?]{20,500})',
+                                    r'(?:wide\s+range\s+of)\s+([^.!?]{20,500})'
+                                ]
+                                for off_p in off_patterns:
+                                    off_match = re.search(off_p, about_text, re.I)
+                                    if off_match:
+                                        business_info["key_offerings"] = off_match.group(1).strip()
+                                        break
+
+                        # 4.3 Visit Contact Us page for contact details
+                        # Also check home page footer/content for contact info
+                        contact_urls = []
+                        if policy_pages["contact_us"]["found"]:
+                            contact_urls.append(policy_pages["contact_us"]["url"])
+                        contact_urls.append(final_url) # Always check home page
+                        
+                        for c_url in contact_urls:
+                            self.logger.info(f"Checking for contact info on: {c_url}")
+                            contact_text = get_clean_page_text(c_url)
+                            if contact_text:
+                                # Extract email
+                                if business_info["contact_info"]["email"] == "Not found":
+                                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', contact_text)
+                                    if email_match:
+                                        business_info["contact_info"]["email"] = email_match.group(0)
+                                
+                                # Extract phone
+                                if business_info["contact_info"]["phone"] == "Not found":
+                                    phone_match = re.search(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', contact_text)
+                                    if phone_match:
+                                        business_info["contact_info"]["phone"] = phone_match.group(0)
+                                
+                                # Extract Address
+                                if business_info["contact_info"]["address"] == "Not found":
+                                    # Look for common address patterns (e.g., Street, City, State, ZIP)
+                                    addr_match = re.search(r'(?:\d{1,5}\s+[\w\s,.]+?(?:Street|St|Avenue|Ave|Road|Rd|Highway|Hwy|Square|Sq|Drive|Dr|Lane|Ln|Court|Ct|Parkway|Pkwy|Circle|Cir),\s*[\w\s]{2,}\s+\d{5,6})', contact_text, re.I)
+                                    if addr_match:
+                                        business_info["contact_info"]["address"] = addr_match.group(0)
+
+                        report["business_details"] = business_info
                         
                         # ===========================================
                         # 5. CONTENT RISK DETECTION
                         # ===========================================
                         
-                        page_text = soup.get_text(separator=' ', strip=True).lower()
+                        # page_text extracted above
                         
                         #  Lorem ipsum detection
                         lorem_ipsum_patterns = [
@@ -685,19 +817,82 @@ class MarketResearchAgent(BaseAgent):
                         
                         # Look for product indicators
                         product_indicators = {
-                            "has_products": "product" in page_text or "shop" in page_text,
-                            "has_pricing": "price" in page_text or "$" in page_text or "₹" in page_text,
+                            "has_products": "product" in page_text or "shop" in page_text or "solution" in page_text,
+                            "has_pricing": "price" in page_text or "$" in page_text or "₹" in page_text or "pricing" in page_text,
                             "has_cart": "add to cart" in page_text or "buy now" in page_text,
-                            "ecommerce_platform": "shopify" in page_text or "woocommerce" in page_text
+                            "ecommerce_platform": "shopify" in page_text or "woocommerce" in page_text,
+                            "extracted_products": [],
+                            "pricing_model": "Not found",
+                            "source_pages": {
+                                "product_page": policy_pages["product"]["url"] if policy_pages["product"]["found"] else None,
+                                "pricing_page": policy_pages["pricing"]["url"] if policy_pages["pricing"]["found"] else None
+                            }
                         }
+
+                        # 7.1 Deep Product Extraction with LLM
+                        content_for_ai = page_text[:2000] # Primary page text
                         
+                        # Fetch and append product page content if different
+                        if product_indicators["source_pages"]["product_page"] and product_indicators["source_pages"]["product_page"] != final_url:
+                            p_text = get_clean_page_text(product_indicators["source_pages"]["product_page"])
+                            content_for_ai += "\n\nPRODUCT PAGE CONTENT:\n" + p_text[:2000]
+                            
+                        # Fetch and append pricing page content if different
+                        if product_indicators["source_pages"]["pricing_page"] and product_indicators["source_pages"]["pricing_page"] != final_url:
+                            pr_text = get_clean_page_text(product_indicators["source_pages"]["pricing_page"])
+                            content_for_ai += "\n\nPRICING PAGE CONTENT:\n" + pr_text[:2000]
+
+                        try:
+                            self.logger.info(f"Extracting product details via LLM for {domain}")
+                            product_prompt = f"""
+                            Review the following website content for {domain} and extract details about their products, services, and pricing.
+                            
+                            WEBSITE CONTENT:
+                            {content_for_ai}
+                            
+                            Return the result as a JSON object with:
+                            - "products": [list of products/services with name, brief_description, and price_if_found]
+                            - "pricing_model": (e.g., Subscription, One-time, Free, Quote-based)
+                            - "target_audience": (brief description of who this is for)
+                            
+                            Be concise and accurate. If not found, use empty list or "Not found".
+                            """
+                            
+                            from langchain.schema import HumanMessage, SystemMessage
+                            messages = [
+                                SystemMessage(content="You are a precise data extraction specialist for market research."),
+                                HumanMessage(content=product_prompt)
+                            ]
+                            
+                            ai_resp = self.llm.invoke(messages)
+                            ai_content = ai_resp.content
+                            
+                            # Clean up markdown if present
+                            if "```json" in ai_content:
+                                ai_content = ai_content.split("```json")[1].split("```")[0].strip()
+                            elif "```" in ai_content:
+                                ai_content = ai_content.split("```")[1].split("```")[0].strip()
+                                
+                            extracted = json.loads(ai_content)
+                            product_indicators["extracted_products"] = extracted.get("products", [])
+                            product_indicators["pricing_model"] = extracted.get("pricing_model", "Not found")
+                            product_indicators["target_audience"] = extracted.get("target_audience", "Not found")
+                            
+                        except Exception as ai_err:
+                            self.logger.error(f"AI Product Extraction failed: {ai_err}")
+
                         report["product_details"] = product_indicators
+                        
+                        # Wrap report in a root key to match Frontend "New View" expectation
+                        final_report = {
+                            "comprehensive_site_scan": report
+                        }
                         
                     except Exception as e:
                         self.logger.error(f"Error during content analysis: {e}")
-                        report["policy_details"] = {"error": str(e)}
+                        final_report = {"comprehensive_site_scan": {"error": str(e), "url": url}}
                     
-                    return json.dumps(report, indent=2)
+                    return json.dumps(final_report, indent=2)
                     
                 except Exception as e:
                     self.logger.error(f"Comprehensive scan failed: {e}")
@@ -895,52 +1090,66 @@ class MarketResearchAgent(BaseAgent):
         """
         # Customize prompt based on action
         if hasattr(task, 'action'):
-            if task.action == 'web_crawler':
-                # Extract URL and keywords from the task input
-                inputs = task.input_data if hasattr(task, 'input_data') else {}
-                url = inputs.get('topic', '')
-                filters = inputs.get('filters', {})
-                keywords = filters.get('industry', '')
-                
-                # Extract new crawler parameters
-                max_pages = inputs.get('max_pages', 5)
-                crawl_depth = inputs.get('crawl_depth', 1)
-                
-                user_prompt = (
-                    f"Action: monitor_url\n"
-                    f"Action Input: {{\"url\": \"{url}\", \"keywords\": \"{keywords}\", \"max_pages\": {max_pages}, \"depth\": {crawl_depth}}}\n\n"
-                    f"CRITICAL: The Final Answer MUST be the raw JSON returned by the tool. Do not generate a summary."
-                )
-                
-            elif task.action == 'site_scan':
+            if task.action == 'site_scan':
+                # DIRECT TOOL EXECUTION (Bypass LLM for deterministic output)
                 inputs = task.input_data if hasattr(task, 'input_data') else {}
                 url = inputs.get('topic', '')
                 business_name = inputs.get('filters', {}).get('business_name', '')
                 
-                user_prompt = (
-                    f"Action: comprehensive_site_scan\n"
-                    f"Action Input: {{\"url\": \"{url}\", \"business_name\": \"{business_name}\"}}\n\n"
-                    f"CRITICAL: The Final Answer MUST be the raw JSON returned by the tool. Do not generate a summary."
-                )
-        # We can add custom logic here if needed, but the base ReAct loop 
-        # (which calls LLM -> Tools -> LLM) should handle most cases if we use LangChain's agent.
-        # However, the base_agent.py implementation seems to be a simple LLM call 
-        # without an automatic tool loop in `_run_agent_loop`.
-        
-        # NOTE: The base_agent.py `_run_agent_loop` implementation shown in context 
-        # only does a single LLM call. To make tools work, we need to use 
-        # LangChain's AgentExecutor or implement a loop.
-        
-        # Let's override to use a proper agent executor if possible, 
-        # or just manually call tools if the base class doesn't support it.
-        # Given the base class structure, let's try to use the tools in the prompt 
-        # or rely on the LLM to ask for tool usage if we were using function calling.
-        
-        # Since the base class `_run_agent_loop` is simple, let's enhance it here 
-        # to support basic tool usage via ReAct or similar, 
-        # OR just rely on the LLM to do the work if it has the context.
-        
-        # Custom output parser for robust handling
+                # Find the tool
+                tool = next((t for t in self.tools if t.name == "comprehensive_site_scan"), None)
+                if tool:
+                    self.logger.info(f"Directly executing tool: {tool.name}")
+                    try:
+                        # Tools in LangChain usually take a single string input or a dict depending on definition
+                        # For @tool with multiple args, it expects a dict or formatted string.
+                        # Since we defined it with @tool, we can try invoking it.
+                        # But simpler: we have the function logic. 
+                        # Best approach with LangChain tools is .invoke() with a dict of args
+                        result = tool.invoke({"url": url, "business_name": business_name})
+                        return {
+                            "response": result,
+                            "action": task.action,
+                            "completed_at": "now"
+                        }
+                    except Exception as e:
+                        self.logger.error(f"Direct tool execution failed: {e}")
+                        # Fallback to LLM if direct execution fails (unlikely)
+            
+            elif task.action == 'web_crawler':
+                # DIRECT TOOL EXECUTION
+                inputs = task.input_data if hasattr(task, 'input_data') else {}
+                url = inputs.get('topic', '')
+                filters = inputs.get('filters', {})
+                keywords = filters.get('industry', '') if filters else ''
+                max_pages = inputs.get('max_pages', 5)
+                depth = inputs.get('crawl_depth', 1)
+                
+                tool = next((t for t in self.tools if t.name == "monitor_url"), None)
+                if tool:
+                    self.logger.info(f"Directly executing tool: {tool.name}")
+                    try:
+                        result = tool.invoke({
+                            "url": url, 
+                            "keywords": keywords, 
+                            "max_pages": max_pages, 
+                            "depth": depth
+                        })
+                        return {
+                            "response": result,
+                            "action": task.action,
+                            "completed_at": "now"
+                        }
+                    except Exception as e:
+                        self.logger.error(f"Direct tool execution failed: {e}")
+
+        # ... (Existing ReAct Agent Logic for other tasks) ... 
+
+        # Optimize prompt for other tasks
+        if hasattr(task, 'action'):
+             # (Existing prompt setup logic can remain or move here if needed)
+             pass 
+
         # Custom output parser for robust handling
         from langchain.agents.output_parsers import ReActSingleInputOutputParser
         from langchain.schema import AgentAction, AgentFinish, OutputParserException

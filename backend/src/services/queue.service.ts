@@ -38,7 +38,7 @@ class QueueService {
         const agentQueue = `tasks:${message.agentType}`;
         await this.redis.xadd(agentQueue, '*', 'data', JSON.stringify(message));
 
-        return messageId;
+        return messageId || '';
     }
 
     /**

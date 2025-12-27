@@ -36,36 +36,47 @@ See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
 
 ## 📦 What's Included
 
-### Phase 1: Core Infrastructure ✅ COMPLETE
+### ✅ Active Features
 
 - ✅ **Backend API** (Node.js/TypeScript + Express)
-  - RESTful endpoints for agents, tasks, monitoring
+  - RESTful endpoints for agents, tasks, monitoring, integrations
   - PostgreSQL database with 9 agents pre-configured
   - Redis queue for async task processing
+  - Real-time system metrics and health monitoring
   
 - ✅ **Agent Framework** (Python + LangChain)
   - Base agent class with ReAct pattern
   - Multi-LLM support (OpenAI/Anthropic/Ollama)
   - Tool system, memory, logging
+  - Queue-based task execution
+  
+- ✅ **Market Research Agent** - Fully functional!
+  - Web search via DuckDuckGo (free)
+  - Advanced web crawler with keyword tracking
+  - Comprehensive site scanning (compliance, policies, MCC codes)
+  - Content risk detection and business details extraction
+  - Queue worker for autonomous processing
   
 - ✅ **Sales Agent** - Fully functional!
   - Email generation
   - Lead qualification
+  - Calendar integration
   - Queue worker for autonomous processing
+  
+- ✅ **Frontend-Backend Integration**
+  - Dashboard with real-time metrics
+  - Agent execution and monitoring
+  - Activity logs with live data
+  - Integration management
+  - Task tracking and history
   
 - ✅ **Docker Deployment**
   - One-command setup with docker-compose
   - PostgreSQL, Redis, Backend API
-  
-- ✅ **Frontend Dashboard** (React + TypeScript)
-  - Beautiful dark theme UI
-  - Agent management pages
-  - System monitoring (currently with mock data)
 
-### Coming in Phase 2-4
+### 🔄 Planned Features
 
-- [ ] Frontend-backend integration
-- [ ] Remaining 8 agents implementation
+- [ ] Remaining 7 agents (Support, HR, Legal, Finance, Marketing, Intelligence, Lead Sourcing)
 - [ ] WebSocket for real-time updates
 - [ ] RAG with vector database
 - [ ] Workflow automation
@@ -99,7 +110,7 @@ OpenAI / Claude / Ollama
 
 ## 🎬 Demo
 
-**Sales Agent Email Generation:**
+**Sales Agent - Email Generation:**
 ```python
 # Input
 task = {
@@ -119,10 +130,24 @@ task = {
 }
 ```
 
-**Lead Qualification:**
+**Market Research Agent - Site Scan:**
 ```python
-# Input: Company info, pain points, budget
-# Output: Score (1-10), recommendation, reasoning
+# Input
+task = {
+  "action": "comprehensive_site_scan",
+  "input": {
+    "url": "https://example.com",
+    "business_name": "Example Inc"
+  }
+}
+
+# Output: Compliance checks, policy detection, MCC classification, risk analysis
+```
+
+**Market Research Agent - Web Search:**
+```python
+# Input: Search query, max results
+# Output: Titles, snippets, and links from DuckDuckGo
 ```
 
 ## 🛠️ Tech Stack
@@ -132,24 +157,27 @@ task = {
 | Frontend | React, TypeScript, Vite, TailwindCSS |
 | Backend API | Node.js, Express, TypeScript |
 | Database | PostgreSQL 16 |
-| Queue | Redis 7 |
+| Queue | Redis 7 (Streams) |
 | Agents | Python 3.11+, LangChain |
 | LLMs | OpenAI GPT-4, Anthropic Claude, Ollama |
+| Web Search | DuckDuckGo Search API (Free) |
+| Web Scraping | BeautifulSoup4, Requests |
+| Domain Analysis | python-whois |
 | Deployment | Docker Compose |
 
 ## 📈 Roadmap
 
-**Phase 1: Core Infrastructure** ✅ COMPLETE (Week 1-2)  
-Backend API, Database, Redis, Sales Agent, Docker setup
+**Phase 1: Core Infrastructure** ✅ COMPLETE  
+Backend API, Database, Redis, Sales Agent, Market Research Agent, Frontend Integration
 
-**Phase 2: Multi-Agent System** 🚧 NEXT (Week 3-4)  
-Implement remaining 8 agents, tool integrations, frontend integration
+**Phase 2: Multi-Agent System** 🚧 IN PROGRESS  
+Implement remaining 7 agents, advanced tool integrations, WebSocket updates
 
-**Phase 3: Advanced Features** (Week 5-6)  
-RAG, persistent memory, workflows, real-time monitoring
+**Phase 3: Advanced Features**  
+RAG, persistent memory, workflows, advanced analytics
 
-**Phase 4: Production** (Week 7-8)  
-Security, performance, cloud deployment, CI/CD
+**Phase 4: Production**  
+Security hardening, performance optimization, cloud deployment, CI/CD
 
 ## 🤝 Contributing
 
