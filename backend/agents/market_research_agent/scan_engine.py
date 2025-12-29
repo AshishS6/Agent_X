@@ -23,6 +23,7 @@ from extractors.links import LinkExtractor
 from extractors.metadata import MetadataExtractor
 from analyzers.content_analyzer import ContentAnalyzer
 from analyzers.seo_analyzer import SEOAnalyzer
+from analyzers.change_detector import ChangeDetector
 from reports.site_scan_report import SiteScanReportBuilder
 
 # Import new Crawl Orchestrator
@@ -39,8 +40,9 @@ class ModularScanEngine:
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
         self.orchestrator = CrawlOrchestrator(logger=self.logger)
+        self.change_detector = ChangeDetector(logger=self.logger)
     
-    def comprehensive_site_scan(self, url: str, business_name: str = "") -> str:
+    def comprehensive_site_scan(self, url: str, business_name: str = "", task_id: str = None) -> str:
         """
         Comprehensive website scan using modular components
         
@@ -82,6 +84,12 @@ class ModularScanEngine:
             # Use CrawlOrchestrator for parallel page discovery
             self.logger.info("[V2.1] Running CrawlOrchestrator...")
             page_graph = asyncio.run(self.orchestrator.crawl(url))
+            
+            # Change Detection: Fetch previous snapshot (before processing logic if we wanted, but we leverage page graph content hash)
+            # We can construct a partial current snapshot object for comparison 
+            # OR we defer comparison until we have full derived signals at the end.
+            # Comparison happens best at the end.
+            previous_snapshot = self.change_detector.get_previous_snapshot(url)
             
             # Get homepage data from page graph
             home_page = page_graph.get_page_by_type('home')
@@ -370,6 +378,41 @@ class ModularScanEngine:
             
             # Build final report
             final_report = report_builder.build()
+            
+            # Run Change Detection Comparison
+            # We need to construct a 'virtual' current snapshot for comparison logic from the report data
+            # Or we can just reuse the save_snapshot logic logic which extracts from report
+            # Let's manually construct the minimal set for 'compare' method
+            
+            # Helper to extract hash from graph
+            def _get_hash(ptype):
+                p = page_graph.get_page_by_type(ptype)
+                return p.content_hash if p else None
+                
+            current_snapshot_data = {
+                'page_hashes': {
+                    'home': _get_hash('home'),
+                    'privacy_policy': _get_hash('privacy_policy'),
+                    'terms_conditions': _get_hash('terms_conditions'),
+                    'product': _get_hash('product'),
+                    'pricing': _get_hash('pricing')
+                },
+                'derived_signals': {
+                    'pricing_model': product_indicators.get('pricing_model') if 'product_indicators' in locals() else None,
+                    'extracted_products': product_indicators.get('extracted_products', []) if 'product_indicators' in locals() else []
+                }
+            }
+            
+            change_report = self.change_detector.compare(current_snapshot_data, previous_snapshot)
+            
+            # Add change detection to final report
+            # Wrapping it inside comprehensive_site_scan to keep structure clean
+            if "comprehensive_site_scan" in final_report:
+                final_report["comprehensive_site_scan"]["change_detection"] = change_report
+            
+            # Save new snapshot
+            self.change_detector.save_snapshot(task_id, url, page_graph, final_report)
+            
             return json.dumps(final_report, indent=2)
             
         except Exception as e:

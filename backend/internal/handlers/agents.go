@@ -164,11 +164,13 @@ func (h *AgentsHandler) Execute(c *gin.Context) {
 
 		// Prepare input for CLI tool
 		cliInput := map[string]any{
-			"action": req.Action,
+			"action":  req.Action,
+			"task_id": task.ID,
 		}
 		for k, v := range req.Input {
 			cliInput[k] = v
 		}
+		log.Printf("[AgentsHandler] Executing task %s with input keys: %+v", task.ID, cliInput)
 
 		// Execute the tool
 		result, err := h.executor.Execute(ctx, tool, cliInput)

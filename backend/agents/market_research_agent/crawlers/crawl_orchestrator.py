@@ -17,6 +17,7 @@ from .url_utils import URLNormalizer, PageClassifier
 from .robots_parser import RobotsTxtParser, RobotsRules
 from .sitemap_parser import SitemapParser
 from .navigation_discovery import NavigationDiscovery
+from .crawl_cache import CrawlCache
 
 
 class CrawlOrchestrator:
@@ -50,6 +51,7 @@ class CrawlOrchestrator:
         self.robots_parser = RobotsTxtParser(logger=self.logger)
         self.sitemap_parser = SitemapParser(logger=self.logger)
         self.nav_discovery = NavigationDiscovery(logger=self.logger)
+        self.cache = CrawlCache(logger=self.logger)
     
     async def crawl(self, url: str) -> NormalizedPageGraph:
         """
@@ -238,6 +240,18 @@ class CrawlOrchestrator:
                     error=CrawlError(type='blocked', message='Blocked by robots.txt')
                 )
         
+        # Check Cache
+        try:
+            cached_page = await asyncio.to_thread(self.cache.get, url)
+            if cached_page:
+                self.logger.info(f"[CACHE] HIT for {url}")
+                cached_page.source = "cache"
+                return cached_page
+            else:
+                self.logger.info(f"[CACHE] MISS for {url}")
+        except Exception as e:
+            self.logger.warning(f"[CACHE] Error checking cache: {e}")
+        
         try:
             async with session.get(
                 url,
@@ -275,7 +289,7 @@ class CrawlOrchestrator:
                 
                 classification = PageClassifier.classify(url, '', title)
                 
-                return PageData(
+                page_data = PageData(
                     url=url,
                     final_url=final_url,
                     canonical_url=canonical,
@@ -288,6 +302,15 @@ class CrawlOrchestrator:
                     depth=depth,
                     error=CrawlError.from_exception(Exception(f"HTTP {response.status}"), response.status) if response.status >= 400 else None
                 )
+                
+                # Update Cache
+                if page_data.status == 200:
+                    try:
+                        await asyncio.to_thread(self.cache.set, page_data)
+                    except Exception as e:
+                        self.logger.warning(f"[CACHE] Failed to set cache: {e}")
+                
+                return page_data
                 
         except asyncio.TimeoutError:
             return PageData(

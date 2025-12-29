@@ -69,8 +69,8 @@ def run_agent(action: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     import uuid
     
-    # Generate task ID
-    task_id = str(uuid.uuid4())
+    # Generate task ID (or use from input)
+    task_id = input_data.get("task_id") or str(uuid.uuid4())
     
     # Get LLM provider from environment
     llm_provider = os.getenv("LLM_PROVIDER", os.getenv("DEFAULT_LLM_PROVIDER", "openai"))
@@ -84,10 +84,11 @@ def run_agent(action: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
         url = input_data.get("topic", "") or input_data.get("url", "")
         business_name = input_data.get("business_name", "")
         
-        logger.info(f"Using V2 modular engine for site scan: {url}")
+        logger.info(f"Using V2 modular engine for site scan: {url} (Task ID: {task_id})")
         
         v2_engine = ModularScanEngine(logger=logger)
-        v2_output = v2_engine.comprehensive_site_scan(url, business_name)
+        # Pass task_id for snapshot tracking
+        v2_output = v2_engine.comprehensive_site_scan(url, business_name, task_id=task_id)
         
         # Parse the V2 output
         v2_data = json.loads(v2_output)
