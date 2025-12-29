@@ -275,7 +275,7 @@ const TaskForm = ({ agentId, onTaskCreated }: TaskFormProps) => {
                 }
             }
 
-            await AgentService.execute(agentId, action, parsedInput);
+            await AgentService.execute('sales', action, parsedInput);
             setInput(''); // Only clear input on success
             onTaskCreated();
         } catch (err) {

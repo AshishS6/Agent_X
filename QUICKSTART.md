@@ -5,6 +5,8 @@ Get your agentic AI platform running in 5 minutes!
 ## Prerequisites
 
 - **Docker Desktop** installed and running
+- **Go 1.21+** installed
+- **Python 3.11+** installed
 - **LLM API Key** (OpenAI, Anthropic, or Ollama locally)
 
 ## Step 1: Configure API Keys
@@ -18,12 +20,7 @@ cp .env.example .env
 # OPENAI_API_KEY=sk-your-key-here
 # OR
 # ANTHROPIC_API_KEY=sk-ant-your-key-here
-
-# Agent environment
-cd ../agents  
-cp .env.example .env
-
-# Edit agents/.env and add the same API key
+# Also set: LLM_PROVIDER=openai (or anthropic)
 ```
 
 ## Step 2: Start Infrastructure
@@ -40,142 +37,104 @@ docker-compose ps
 You should see:
 - ✅ `agentx-postgres` - running
 - ✅ `agentx-redis` - running
-- ✅ `agentx-backend` - running
 
-## Step 3: Verify Backend
+## Step 3: Install Python Dependencies
 
 ```bash
-# Test health check
+cd backend/agents
+pip install -r requirements.txt
+```
+
+> **Note**: Agents require:
+> - `duckduckgo-search` (web search)
+> - `beautifulsoup4` (web scraping)
+> - `langchain`, `langchain-openai`, `langchain-anthropic`
+> - `python-whois` (domain analysis)
+
+## Step 4: Start the Go Backend
+
+```bash
+cd backend
+make dev
+```
+
+You should see:
+```
+[GIN-debug] Listening and serving HTTP on :3001
+```
+
+The Go backend:
+- Exposes REST API on port 3001
+- Spawns Python CLI agents as subprocesses
+- Manages hybrid concurrency (global + per-tool limits)
+
+## Step 5: Verify System
+
+```bash
+# Health check
 curl http://localhost:3001/api/monitoring/health
 
 # Expected response:
-# {"success":true,"data":{"status":"healthy","services":{"database":true,"redis":true}}}
+# {"success":true,"data":{"status":"healthy","services":{"database":true}}}
+
+# List available tools
+curl http://localhost:3001/api/tools
 ```
 
-## Step 4: Start Agent Worker
+## Step 6: Test Agent Execution
 
-You can run either or both agents depending on your needs.
-
-### Option A: Sales Agent
+### Market Research Agent - Site Scan
 
 ```bash
-# In a new terminal window
-cd agents/sales_agent
-python worker.py
+curl -X POST http://localhost:3001/api/agents/market_research/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "comprehensive_site_scan",
+    "input": {
+      "topic": "https://example.com",
+      "business_name": "Example Inc"
+    }
+  }'
 ```
 
-You should see:
-```
-Sales Agent Worker started, listening on tasks:sales
-Using LLM provider: openai
-```
-
-### Option B: Market Research Agent
+Response will include a task ID. Check the result:
 
 ```bash
-# In a new terminal window
-cd agents/market_research_agent
-python worker.py
+curl http://localhost:3001/api/tasks/{task-id}
 ```
 
-You should see:
-```
-Market Research Agent Worker started, listening on tasks:market_research
-Using LLM provider: openai
-```
-
-> **Note**: Market Research Agent requires additional dependencies:
-> - `duckduckgo-search` (web search)
-> - `beautifulsoup4` (web scraping)
-> - `python-whois` (domain analysis)
-> 
-> These are included in `agents/requirements.txt`
-
-## Step 5: Test the System
-
-### Option A: Direct Agent Test (No Backend)
-
-**Sales Agent:**
-```bash
-cd agents/sales_agent
-python test_agent.py
-```
-
-**Market Research Agent:**
-```bash
-cd agents/market_research_agent
-python test_agent.py
-```
-
-These will test the agents directly using the LLM.
-
-### Option B: Full Stack Test (API → Queue → Agent)
-
-**Test Sales Agent:**
+### Sales Agent - Email Generation
 
 ```bash
-# 1. Get Sales Agent ID
-curl http://localhost:3001/api/agents | jq '.data[] | select(.type=="sales") | .id'
-
-# 2. Execute email generation task (replace {agent-id})
-curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
+curl -X POST http://localhost:3001/api/agents/sales/execute \
   -H "Content-Type: application/json" \
   -d '{
     "action": "generate_email",
     "input": {
       "recipientName": "John Doe",
-      "context": "Follow up after demo"
-    },
-    "priority": "high"
-  }'
-
-# 3. Check task result (replace {task-id} from response)
-curl http://localhost:3001/api/tasks/{task-id}
-```
-
-**Test Market Research Agent:**
-
-```bash
-# 1. Get Market Research Agent ID
-curl http://localhost:3001/api/agents | jq '.data[] | select(.type=="market_research") | .id'
-
-# 2. Execute site scan (replace {agent-id})
-curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "comprehensive_site_scan",
-    "input": {
-      "url": "https://example.com",
-      "business_name": "Example Inc"
-    },
-    "priority": "high"
-  }'
-
-# 3. Execute web search (replace {agent-id})
-curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "search_web",
-    "input": {
-      "query": "artificial intelligence trends 2024",
-      "max_results": 5
+      "context": "Follow up after product demo"
     }
   }'
-
-# 4. Check task result
-curl http://localhost:3001/api/tasks/{task-id}
 ```
 
-SELECT id, type, name, status FROM agents;
+### Direct CLI Testing (No Backend)
 
-# View recent tasks
-SELECT id, action, status, created_at FROM tasks ORDER BY created_at DESC LIMIT 5;
+You can test agents directly:
 
-# Exit
-\q
+```bash
+# Market Research Agent
+cd backend/agents/market_research_agent
+python cli.py --input '{"action": "site_scan", "url": "https://example.com"}'
+
+# Sales Agent
+cd backend/agents/sales_agent
+python cli.py --input '{"action": "generate_email", "recipientName": "Jane", "context": "Demo follow-up"}'
+
+# Dry run (validate input without executing)
+python cli.py --input '{"action": "site_scan", "url": "https://example.com"}' --dry-run
 ```
 
-## Step 6: Access the Frontend
+## Step 7: Start the Frontend
 
 ```bash
 # In Agent_X root directory (new terminal)
@@ -183,87 +142,100 @@ npm install  # First time only
 npm run dev
 ```
 
-Dashboard will open at http://localhost:5173
+Dashboard opens at http://localhost:5173
 
 **Active Pages:**
 - ✅ Dashboard Home - Real-time system metrics
-- ✅ Market Research Agent - Full functionality with site scan, crawler, search
+- ✅ Market Research Agent - Site scan with V2 engine
 - ✅ Sales Agent - Email generation and lead qualification
 - ✅ Activity Logs - Live task execution history
-- ✅ Integrations - Integration management
-- 🔄 Other agent pages - UI only (backend not implemented)
 
 ---
 
 ## Troubleshooting
 
-### Backend won't start
+### Go backend won't start
 ```bash
-docker-compose logs backend
-# Look for database connection errors
-# Make sure DATABASE_URL in backend/.env matches docker-compose.yml
+# Check if port 3001 is in use
+lsof -i :3001
+
+# Verify database connection
+cd backend && make dev
+
+# Check logs for database errors
 ```
 
-### Worker can't find modules
+### Python agent errors
 ```bash
-cd agents
+# Verify dependencies
+cd backend/agents
 pip install -r requirements.txt
-# Make sure you're in a Python 3.11+ environment
+
+# Test CLI directly
+cd market_research_agent
+python cli.py --input '{"action": "site_scan", "url": "https://google.com"}'
 ```
 
 ### "API key not set" error
 ```bash
-# Backend needs: backend/.env
-# Agents need: agents/.env
-# Make sure both have OPENAI_API_KEY or ANTHROPIC_API_KEY
+# Ensure backend/.env has:
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-your-key-here
 ```
 
 ### Database not initialized
 ```bash
 docker-compose down -v  # Remove volumes
-docker-compose up -d    # Restart (will re-run schema.sql)
+docker-compose up -d    # Restart (will re-run init)
 ```
 
 ---
 
-## What's Working
+## Architecture Overview
 
-✅ Backend API with 9 agents configured  
-✅ PostgreSQL database with schema  
-✅ Redis message queue  
-✅ **Sales Agent** with LLM integration  
-✅ **Market Research Agent** with web search, crawling, site scanning  
-✅ Task processing pipeline  
-✅ **Frontend-Backend Integration** for dashboard, agents, tasks  
-✅ Real-time monitoring and metrics  
-✅ Activity logs with live data  
-✅ Integration management  
+```
+┌─────────────────┐
+│    Frontend     │ (React + TypeScript)
+│  localhost:5173 │
+└────────┬────────┘
+         │ HTTP
+┌────────▼────────┐
+│   Go Backend    │ (Gin framework)
+│  localhost:3001 │
+└────────┬────────┘
+         │ subprocess spawn
+┌────────▼────────┐
+│  Python Agents  │ (CLI tools)
+│   cli.py        │
+└────────┬────────┘
+         │ API calls
+┌────────▼────────┐
+│  LLM Provider   │
+│ OpenAI/Claude   │
+└─────────────────┘
+```
 
-## What's Next
-
-After verifying the system works:
-
-1. **Implement Remaining Agents** - Support, HR, Legal, Finance, Marketing, Intelligence, Lead Sourcing
-2. **WebSocket Integration** - Add real-time updates for task status
-3. **Advanced Features** - RAG, workflows, analytics
+**Key Insight**: No Redis workers! The Go backend spawns Python agents directly as subprocesses, capturing stdout as JSON output.
 
 ---
 
 ## Quick Reference
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| Backend API | http://localhost:3001 | - |
-| PostgreSQL | localhost:5432 | postgres / dev_password |
-| Redis | localhost:6379 | - |
-| Frontend | http://localhost:5173 | - |
+| Service | URL | Notes |
+|---------|-----|-------|
+| Go Backend | http://localhost:3001 | Main API |
+| PostgreSQL | localhost:5432 | Via Docker |
+| Frontend | http://localhost:5173 | Vite dev server |
 
-## Support
+## API Endpoints
 
-- 📖 Backend docs: `backend/README.md`
-- 🐍 Agent docs: `agents/README.md`
-- 🎯 Implementation plan: See artifact
-- 🚶 Walkthrough: See artifact
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/agents` | List all agents |
+| POST | `/api/agents/:name/execute` | Execute agent (e.g., `market_research`, `sales`) |
+| GET | `/api/tasks/:id` | Get task result |
+| GET | `/api/tools` | List available CLI tools |
+| GET | `/api/monitoring/health` | Health check |
 
 ---
 

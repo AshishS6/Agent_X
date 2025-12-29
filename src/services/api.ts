@@ -95,8 +95,11 @@ export const AgentService = {
         return mapAgentFromApi(response.data.data);
     },
 
-    execute: async (id: string, action: string, input: any, priority: string = 'medium'): Promise<Task> => {
-        const response = await api.post<{ data: any }>(`/agents/${id}/execute`, {
+    /**
+     * Execute an agent task using agent type (e.g., "market-research", "sales")
+     */
+    execute: async (agentType: string, action: string, input: any, priority: string = 'medium'): Promise<Task> => {
+        const response = await api.post<{ data: any }>(`/agents/${agentType}/execute`, {
             action,
             input,
             priority,

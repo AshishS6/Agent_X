@@ -1,267 +1,135 @@
-# Agent_X Backend Setup Guide
+# Go Backend for Agent_X
 
-## Quick Start (Docker)
+A Go-based backend server that executes Python CLI tools with hybrid concurrency control.
 
-### Prerequisites
-- Docker Desktop installed
-- Node.js 20+ (for local development without Docker)
-- PostgreSQL client tools (optional, for direct database access)
-
-### 1. Start All Services
-
-```bash
-# From the Agent_X directory
-docker-compose up -d
-```
-
-This will start:
-- **PostgreSQL** on port 5432
-- **Redis** on port 6379
-- **Backend API** on port 3001
-
-### 2. Verify Services
-
-```bash
-# Check service status
-docker-compose ps
-
-# View logs
-docker-compose logs -f backend
-
-# Test API health
-curl http://localhost:3001/api/monitoring/health
-```
-
-### 3. Access the API
-
-- **API Root**: http://localhost:3001
-- **Health Check**: http://localhost:3001/api/monitoring/health
-- **Agents List**: http://localhost:3001/api/agents
-- **System Metrics**: http://localhost:3001/api/monitoring/metrics
-
----
-
-##Local Development (Without Docker)
-
-### 1. Install Dependencies
-
-```bash
-cd backend
-npm install
-```
-
-### 2. Set Up PostgreSQL
-
-```bash
-# Install PostgreSQL (macOS with Homebrew)
-brew install postgresql@16
-brew services start postgresql@16
-
-# Create database
-createdb agentx
-
-# Run schema
-psql agentx < ../database/schema.sql
-```
-
-### 3. Set Up Redis
-
-```bash
-# Install Redis (macOS with Homebrew)
-brew install redis
-brew services start redis
-```
-
-### 4. Configure Environment
-
-```bash
-# Copy example env file
-cp .env.example .env
-
-# Edit .env and add your API keys:
-# OPENAI_API_KEY=sk-...
-# ANTHROPIC_API_KEY=sk-ant-...
-```
-
-### 5. Start Backend
-
-```bash
-npm run dev
-```
-
----
-
-## API Documentation
-
-### Agents
-
-**GET /api/agents** - List all agents
-```bash
-curl http://localhost:3001/api/agents
-```
-
-**GET /api/agents/:id** - Get agent by ID
-```bash
-curl http://localhost:3001/api/agents/{agent-id}
-```
-
-**POST /api/agents/:id/execute** - Execute agent with task
-```bash
-curl -X POST http://localhost:3001/api/agents/{agent-id}/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "generate_email",
-    "input": {
-      "recipientName": "John Doe",
-      "context": "Follow up on demo call"
-    },
-    "priority": "high"
-  }'
-```
-
-**PUT /api/agents/:id** - Update agent
-```bash
-curl -X PUT http://localhost:3001/api/agents/{agent-id} \
-  -H "Content-Type: application/json" \
-  -d '{"status": "paused"}'
-```
-
-**GET /api/agents/:id/metrics** - Get agent metrics
-```bash
-curl http://localhost:3001/api/agents/{agent-id}/metrics
-```
-
-### Tasks
-
-**GET /api/tasks** - List tasks with filters
-```bash
-# All tasks
-curl http://localhost:3001/api/tasks
-
-# Filtered by agent
-curl "http://localhost:3001/api/tasks?agentId={agent-id}&status=completed&limit=10"
-```
-
-**GET /api/tasks/:id** - Get task details
-```bash
-curl http://localhost:3001/api/tasks/{task-id}
-```
-
-### Monitoring
-
-**GET /api/monitoring/health** - Health check
-```bash
-curl http://localhost:3001/api/monitoring/health
-```
-
-**GET /api/monitoring/metrics** - System metrics
-```bash
-curl http://localhost:3001/api/monitoring/metrics
-```
-
-**GET /api/monitoring/activity** - Recent activity
-```bash
-curl http://localhost:3001/api/monitoring/activity?limit=20
-```
-
----
-
-## Database Access
-
-```bash
-# Connect to database (Docker)
-docker-compose exec postgres psql -U postgres -d agentx
-
-# Connect to database (local)
-psql agentx
-
-# Useful queries:
-SELECT * FROM agents;
-SELECT * FROM tasks ORDER BY created_at DESC LIMIT 10;
-SELECT * FROM agent_statistics;
-```
-
----
-
-## Troubleshooting
-
-### Database connection failed
-```bash
-# Check PostgreSQL is running
-docker-compose ps postgres
-
-# View logs
-docker-compose logs postgres
-
-# Restart service
-docker-compose restart postgres
-```
-
-### Redis connection failed
-```bash
-# Check Redis is running
-docker-compose ps redis
-
-# Test connection
-docker-compose exec redis redis-cli ping
-
-# Should return: PONG
-```
-
-### Backend not starting
-```bash
-# Check logs
-docker-compose logs backend
-
-# Rebuild container
-docker-compose build backend
-docker-compose up -d backend
-```
-
----
-
-## Development Commands
+## Quick Start
 
 ```bash
 # Install dependencies
-cd backend && npm install
+go mod download
 
-# Run in development mode
-npm run dev
+# Copy environment file
+cp .env.example .env
 
-# Build for production
-npm run build
+# Edit .env with your database and API keys
+vim .env
 
-# Run production build
-npm start
-
-# Lint code
-npm run lint
-
-# Run tests
-npm test
+# Run the server
+make dev
 ```
 
----
+## Architecture
 
-## Next Steps
+```
+Frontend → Go Backend → CLI Tool (Python subprocess) → Result
+                ↓
+           PostgreSQL (same DB as Node.js backend)
+```
 
-1. **Frontend Integration** - Update React frontend to call these APIs
-2. **Agent Services** - Implement Python agent workers
-3. **WebSocket** - Add real-time updates for dashboard
-4. **Authentication** - Add JWT auth for production
+### Hybrid Concurrency Control
 
----
+- **Global Limit (10)**: Maximum concurrent tool executions across all tools
+- **Per-Tool Limit (5)**: Maximum concurrent executions per tool type
 
-## Environment Variables Reference
+This prevents any single tool from monopolizing resources while ensuring predictable memory usage.
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PORT` | No | 3001 | API server port |
-| `NODE_ENV` | No | development | Environment mode |
-| `DATABASE_URL` | Yes | - | PostgreSQL connection string |
-| `REDIS_URL` | Yes | - | Redis connection string |
-| `OPENAI_API_KEY` | No | - | OpenAI API key for LLM |
-| `ANTHROPIC_API_KEY` | No | - | Anthropic Claude API key |
-| `FRONTEND_URL` | No | http://localhost:5173 | Frontend URL for CORS |
-| `LOG_LEVEL` | No | info | Logging level |
+## API Endpoints
+
+### Agents (Backward Compatible)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/agents` | List all agents |
+| GET | `/api/agents/:id` | Get agent by ID |
+| POST | `/api/agents/:id/execute` | Execute agent task |
+| PUT | `/api/agents/:id` | Update agent |
+| GET | `/api/agents/:id/metrics` | Get agent metrics |
+
+### Tasks
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/tasks` | List all tasks |
+| GET | `/api/tasks/:id` | Get task by ID |
+| GET | `/api/tasks/status/counts` | Get task status counts |
+
+### Tools (New)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/tools` | List available tools |
+| GET | `/api/tools/:name` | Get tool configuration |
+
+### Monitoring
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/monitoring/health` | Health check |
+| GET | `/api/monitoring/metrics` | System metrics |
+| GET | `/api/monitoring/activity` | Recent activity |
+| GET | `/api/monitoring/system` | System info |
+
+## Adding New Tools
+
+1. Create CLI tool in `agents/<tool_name>/cli.py`
+2. Register in `internal/tools/registry.go`:
+
+```go
+"my-tool": {
+    Name:             "My Tool",
+    Description:      "Description of what it does",
+    Command:          "python",
+    Args:             []string{"agents/my_tool_agent/cli.py"},
+    Timeout:          3 * time.Minute,
+    WorkingDir:       ".",
+    ConcurrencyLimit: 5,
+    AgentType:        "my-tool",
+},
+```
+
+3. Seed agent in database (optional, for backward compat)
+
+## CLI Tool Contract
+
+All Python CLI tools must follow this contract:
+
+**Input**: `--input '{"action": "...", "key": "value"}'`
+
+**Output** (JSON to stdout):
+```json
+{
+  "status": "completed" | "failed",
+  "output": { ... },
+  "error": "string if failed",
+  "metadata": { ... }
+}
+```
+
+**Logs**: Write to stderr (not stdout)
+
+**Exit Code**: 0 = success, non-zero = failure
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| PORT | 3001 | Server port |
+| GIN_MODE | debug | Gin mode (debug/release) |
+| DATABASE_URL | postgres://... | PostgreSQL connection string |
+| GLOBAL_CONCURRENCY_LIMIT | 10 | Max total concurrent executions |
+| DEFAULT_TOOL_CONCURRENCY_LIMIT | 5 | Default per-tool limit |
+| CORS_ORIGINS | localhost:5173 | Allowed CORS origins |
+| LLM_PROVIDER | openai | LLM provider for tools |
+| OPENAI_API_KEY | - | OpenAI API key |
+
+## Development
+
+```bash
+# Format code
+make fmt
+
+# Run tests
+make test
+
+# Build binary
+make build
+
+# Clean
+make clean
+```

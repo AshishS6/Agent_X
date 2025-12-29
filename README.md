@@ -8,9 +8,9 @@ Agent_X is a production-ready agentic AI platform featuring:
 
 - **9 Specialized AI Agents** for Sales, Support, HR, Legal, Finance, and more
 - **Multi-LLM Support** - OpenAI, Anthropic Claude, or Ollama (local/free)
-- **Microservices Architecture** - Scalable backend with message queuing
+- **Go + Python Architecture** - High-performance Go backend with Python AI agents
+- **CLI-Based Execution** - Agents run as CLI tools, spawned directly by the backend
 - **Beautiful Dashboard** - React UI for managing and monitoring agents
-- **Real Agent Execution** - Not just a demo, actual LLM-powered agents that work
 
 ## 🚀 Quick Start
 
@@ -19,17 +19,18 @@ Agent_X is a production-ready agentic AI platform featuring:
 git clone <your-repo>
 cd Agent_X
 cp backend/.env.example backend/.env  # Add your OpenAI/Anthropic API key
-cp agents/.env.example agents/.env
 
-# 2. Start infrastructure
+# 2. Start infrastructure (PostgreSQL & Redis)
 docker-compose up -d
 
-# 3. Run agent worker
-cd agents && pip install -r requirements.txt
-cd sales_agent && python worker.py
+# 3. Install Python dependencies
+cd backend/agents && pip install -r requirements.txt
 
-# 4. Test it!
-python test_agent.py
+# 4. Start the Go backend
+cd backend && make dev
+
+# 5. Start the frontend
+cd .. && npm run dev
 ```
 
 See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
@@ -38,41 +39,39 @@ See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
 
 ### ✅ Active Features
 
-- ✅ **Backend API** (Node.js/TypeScript + Express)
-  - RESTful endpoints for agents, tasks, monitoring, integrations
+- ✅ **Go Backend API** (Gin + PostgreSQL)
+  - RESTful endpoints for agents, tasks, monitoring
+  - CLI tool executor with hybrid concurrency control
   - PostgreSQL database with 9 agents pre-configured
-  - Redis queue for async task processing
   - Real-time system metrics and health monitoring
   
 - ✅ **Agent Framework** (Python + LangChain)
   - Base agent class with ReAct pattern
   - Multi-LLM support (OpenAI/Anthropic/Ollama)
-  - Tool system, memory, logging
-  - Queue-based task execution
+  - CLI interface for subprocess execution
+  - Tool system, memory, and logging
   
 - ✅ **Market Research Agent** - Fully functional!
   - Web search via DuckDuckGo (free)
   - Advanced web crawler with keyword tracking
-  - Comprehensive site scanning (compliance, policies, MCC codes)
+  - Comprehensive site scanning (V2 modular engine)
   - Content risk detection and business details extraction
-  - Queue worker for autonomous processing
+  - SEO analysis and tech stack detection
   
 - ✅ **Sales Agent** - Fully functional!
   - Email generation
   - Lead qualification
   - Calendar integration
-  - Queue worker for autonomous processing
   
 - ✅ **Frontend-Backend Integration**
   - Dashboard with real-time metrics
   - Agent execution and monitoring
   - Activity logs with live data
-  - Integration management
   - Task tracking and history
   
 - ✅ **Docker Deployment**
   - One-command setup with docker-compose
-  - PostgreSQL, Redis, Backend API
+  - PostgreSQL, Redis infrastructure
 
 ### 🔄 Planned Features
 
@@ -80,74 +79,64 @@ See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
 - [ ] WebSocket for real-time updates
 - [ ] RAG with vector database
 - [ ] Workflow automation
-- [ ] Production deployment to cloud
 
 ## 🏗️ Architecture
 
 ```
 Frontend (React)
      ↓ HTTP
-Backend API (Node.js)
-     ↓ Redis Queue
-Agent Workers (Python)
-     ↓ LLM Calls
+Go Backend (Gin)
+     ↓ subprocess spawn
+Python CLI Agents
+     ↓ LLM API
 OpenAI / Claude / Ollama
 ```
 
-- **Backend**: Express.js REST API
-- **Database**: PostgreSQL with JSONB
-- **Queue**: Redis Streams
-- **Agents**: Python + LangChain
-- **LLMs**: Multi-provider support
+### CLI-Based Agent Execution
+
+Unlike queue-based systems, Agent_X runs Python agents as CLI tools:
+
+1. **Frontend** sends request to Go backend
+2. **Go backend** spawns `python3 cli.py --input '{...}'`
+3. **Python agent** executes and returns JSON to stdout
+4. **Go backend** parses output and updates database
+
+This provides:
+- **Simpler architecture** - No Redis workers needed
+- **Better observability** - Direct stdout/stderr logging
+- **Easy debugging** - Run agents standalone
+- **Hybrid concurrency** - Global + per-tool limits
 
 ## 📚 Documentation
 
 - [Quick Start Guide](./QUICKSTART.md) - Get running in 5 minutes
-- [Backend README](./backend/README.md) - API documentation
-- [Agents README](./agents/README.md) - Agent development guide
-- [Implementation Plan](./docs/implementation_plan.md) - Full roadmap
-- [Walkthrough](./docs/walkthrough.md) - What we've built
+- [Go Backend README](./backend/README.md) - API documentation
+- [Agents README](./backend/agents/README.md) - Agent development guide
 
 ## 🎬 Demo
 
+**Market Research Agent - Site Scan (V2 Engine):**
+```bash
+# Execute via API
+curl -X POST http://localhost:3001/api/agents/market_research/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "comprehensive_site_scan",
+    "input": {"topic": "https://example.com", "business_name": "Example Inc"}
+  }'
+
+# Or run CLI directly
+python cli.py --input '{"action": "site_scan", "url": "https://example.com"}'
+```
+
 **Sales Agent - Email Generation:**
-```python
-# Input
-task = {
-  "action": "generate_email",
-  "input": {
-    "recipientName": "Jane Smith",
-    "context": "Follow up after demo"
-  }
-}
-
-# Output (from GPT-4)
-{
-  "email": {
-    "subject": "Following Up on Our Demo",
-    "body": "Hi Jane,\n\nGreat connecting with you yesterday..."
-  }
-}
-```
-
-**Market Research Agent - Site Scan:**
-```python
-# Input
-task = {
-  "action": "comprehensive_site_scan",
-  "input": {
-    "url": "https://example.com",
-    "business_name": "Example Inc"
-  }
-}
-
-# Output: Compliance checks, policy detection, MCC classification, risk analysis
-```
-
-**Market Research Agent - Web Search:**
-```python
-# Input: Search query, max results
-# Output: Titles, snippets, and links from DuckDuckGo
+```bash
+curl -X POST http://localhost:3001/api/agents/sales/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "generate_email",
+    "input": {"recipientName": "Jane Smith", "context": "Follow up after demo"}
+  }'
 ```
 
 ## 🛠️ Tech Stack
@@ -155,44 +144,44 @@ task = {
 | Component | Technology |
 |-----------|-----------|
 | Frontend | React, TypeScript, Vite, TailwindCSS |
-| Backend API | Node.js, Express, TypeScript |
+| Backend API | **Go 1.21+, Gin** |
 | Database | PostgreSQL 16 |
-| Queue | Redis 7 (Streams) |
 | Agents | Python 3.11+, LangChain |
 | LLMs | OpenAI GPT-4, Anthropic Claude, Ollama |
 | Web Search | DuckDuckGo Search API (Free) |
 | Web Scraping | BeautifulSoup4, Requests |
-| Domain Analysis | python-whois |
 | Deployment | Docker Compose |
 
 ## 📈 Roadmap
 
 **Phase 1: Core Infrastructure** ✅ COMPLETE  
-Backend API, Database, Redis, Sales Agent, Market Research Agent, Frontend Integration
+Go Backend, Database, Agent CLI Framework, Frontend Integration
 
-**Phase 2: Multi-Agent System** 🚧 IN PROGRESS  
-Implement remaining 7 agents, advanced tool integrations, WebSocket updates
+**Phase 2: V2 Engine** ✅ COMPLETE  
+Modular scan engine, SEO analysis, tech stack detection
 
-**Phase 3: Advanced Features**  
-RAG, persistent memory, workflows, advanced analytics
+**Phase 3: Multi-Agent System** 🚧 IN PROGRESS  
+Implement remaining 7 agents, advanced tool integrations
 
 **Phase 4: Production**  
-Security hardening, performance optimization, cloud deployment, CI/CD
+Security hardening, performance optimization, cloud deployment
 
-## 🤝 Contributing
+## 🤝 Adding New Agents
 
-Agents are designed to be easy to extend:
+1. Create CLI tool in `backend/agents/<agent_name>/cli.py`
+2. Register in `backend/internal/tools/registry.go`:
 
-```python
-class MyAgent(BaseAgent):
-    def _register_tools(self):
-        # Add custom tools
-        
-    def _get_system_prompt(self):
-        return "You are a helpful..."
-        
-# That's it! Framework handles the rest.
+```go
+"my_agent": {
+    Name:        "My Agent",
+    Command:     "python3",
+    Args:        []string{"agents/my_agent/cli.py"},
+    Timeout:     3 * time.Minute,
+    AgentType:   "my_agent",
+},
 ```
+
+3. Seed agent in database (optional)
 
 ## 📄 License
 
@@ -201,9 +190,8 @@ MIT
 ## 🙋 Support
 
 - **Issues**: GitHub Issues
-- **Docs**: See `docs/` directory
-- **Questions**: Open a discussion
+- **Docs**: See documentation above
 
 ---
 
-Built with ❤️ using OpenAI, LangChain, and modern web technologies
+Built with ❤️ using Go, Python, LangChain, and OpenAI

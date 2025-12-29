@@ -1,5 +1,35 @@
-node_modules
-dist
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
 .env
-*.log
+.env.local
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build output
+dist/

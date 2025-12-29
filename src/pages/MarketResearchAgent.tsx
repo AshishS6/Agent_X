@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, Globe, Search, Plus, Loader, AlertCircle, FileText, CheckCircle, XCircle, AlertTriangle, Eye, Download, Shield, CreditCard, ShoppingBag, Building, ExternalLink } from 'lucide-react';
 import { AgentService, TaskService, Task, Agent } from '../services/api';
+import { FEATURES } from '../config/features';
+import TechStackCard from '../components/market-research/TechStackCard';
+import SEOHealthCard from '../components/market-research/SEOHealthCard';
+import BusinessMetadataV2 from '../components/market-research/BusinessMetadataV2';
 
 const MarketResearchAgent = () => {
     const [agent, setAgent] = useState<Agent | null>(null);
@@ -88,7 +92,7 @@ const MarketResearchAgent = () => {
                 })
             };
 
-            await AgentService.execute(agent.id, researchType, input);
+            await AgentService.execute('market_research', researchType, input);
 
             setIsModalOpen(false);
             setTopic('');
@@ -1047,6 +1051,15 @@ const MarketResearchAgent = () => {
                                                             </div>
                                                         </div>
                                                     </div>
+
+                                                    {/* V2 Features - Feature Flagged */}
+                                                    {FEATURES.ENABLE_MARKET_RESEARCH_V2_UI && (
+                                                        <div className="p-6 space-y-4 bg-gray-900/30 border-t border-gray-700">
+                                                            <TechStackCard techStack={displayData.tech_stack} />
+                                                            <SEOHealthCard seoAnalysis={displayData.seo_analysis} />
+                                                            <BusinessMetadataV2 businessDetails={displayData.business_details} />
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
