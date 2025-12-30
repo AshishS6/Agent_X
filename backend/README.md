@@ -23,7 +23,7 @@ make dev
 ```
 Frontend → Go Backend → CLI Tool (Python subprocess) → Result
                 ↓
-           PostgreSQL (same DB as Node.js backend)
+           PostgreSQL Database
 ```
 
 ### Hybrid Concurrency Control

@@ -13,7 +13,7 @@ type ToolConfig struct {
 	Timeout          time.Duration `json:"timeout"`     // Max execution time
 	WorkingDir       string        `json:"working_dir"` // Working directory for the command
 	ConcurrencyLimit int           `json:"concurrency"` // Per-tool concurrency limit (0 = use default)
-	AgentType        string        `json:"agent_type"`  // Maps to agent type in DB (e.g., "market-research")
+	AgentType        string        `json:"agent_type"`  // Maps to agent type in DB (e.g., "market_research")
 }
 
 // Registry holds all available tools

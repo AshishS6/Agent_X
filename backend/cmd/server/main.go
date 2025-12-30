@@ -88,7 +88,7 @@ func main() {
 		{
 			agents.GET("", agentsHandler.GetAll)
 			agents.GET("/:id", agentsHandler.GetByID)
-			agents.POST("/:name/execute", agentsHandler.Execute) // Uses agent type (e.g., "market-research")
+			agents.POST("/:name/execute", agentsHandler.Execute) // Uses agent type (e.g., "market_research")
 			agents.PUT("/:id", agentsHandler.Update)
 			agents.GET("/:id/metrics", agentsHandler.GetMetrics)
 		}

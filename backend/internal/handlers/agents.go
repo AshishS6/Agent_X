@@ -85,7 +85,7 @@ type ExecuteRequest struct {
 
 // Execute runs an agent with the given task
 // POST /api/agents/:name/execute
-// :name is the agent type (e.g., "market-research", "sales")
+// :name is the agent type (e.g., "market_research", "sales")
 func (h *AgentsHandler) Execute(c *gin.Context) {
 	name := c.Param("name")
 

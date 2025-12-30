@@ -110,6 +110,7 @@ This provides:
 ## 📚 Documentation
 
 - [Quick Start Guide](./QUICKSTART.md) - Get running in 5 minutes
+- [Architecture Guide](./docs/ARCHITECTURE.md) - Deep dive into system design and internals
 - [Go Backend README](./backend/README.md) - API documentation
 - [Agents README](./backend/agents/README.md) - Agent development guide
 
