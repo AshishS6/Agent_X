@@ -1,7 +1,11 @@
-# Cleanup Tasks and Implement Pagination
+# [ARCHIVED] Cleanup Tasks and Implement Pagination
+
+> **Note**: This document is archived. The features described here have been completed. This is kept for historical reference only.
 
 ## Goal Description
 Clean up "stuck" tasks that are in "processing" state for too long and implement pagination for the Market Research Agent's history table to handle large numbers of tasks.
+
+**Status**: ✅ Completed
 
 ## Proposed Changes
 

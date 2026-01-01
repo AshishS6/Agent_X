@@ -35,8 +35,10 @@ docker-compose ps
 ```
 
 You should see:
-- ✅ `agentx-postgres` - running
-- ✅ `agentx-redis` - running
+- ✅ `agentx-postgres` - running (PostgreSQL 16)
+- ✅ `agentx-redis` - running (Redis 7, for future features)
+
+**Note**: The database schema (`database/schema.sql`) is automatically applied on first startup. This creates all tables (agents, tasks, conversations, etc.) and seeds the 9 agents.
 
 ## Step 3: Install Python Dependencies
 
@@ -58,15 +60,22 @@ cd backend
 make dev
 ```
 
+**Note**: If `air` (hot reload tool) is not installed, it will fall back to `go run ./cmd/server`.
+
 You should see:
 ```
-[GIN-debug] Listening and serving HTTP on :3001
+✅ Database connected
+📁 Project root: /path/to/Agent_X
+⚡ Executor initialized (global: 10, per-tool default: 5)
+🚀 Server starting on port 3001
 ```
 
 The Go backend:
 - Exposes REST API on port 3001
-- Spawns Python CLI agents as subprocesses
-- Manages hybrid concurrency (global + per-tool limits)
+- Spawns Python CLI agents as subprocesses (`os/exec`)
+- Manages hybrid concurrency (global limit: 10, per-tool limit: 5)
+- Automatically initializes MCC (Merchant Category Codes) tables
+- Graceful shutdown on SIGINT/SIGTERM
 
 ## Step 5: Verify System
 
@@ -77,8 +86,14 @@ curl http://localhost:3001/api/monitoring/health
 # Expected response:
 # {"success":true,"data":{"status":"healthy","services":{"database":true}}}
 
-# List available tools
+# List all agents
+curl http://localhost:3001/api/agents
+
+# List available CLI tools
 curl http://localhost:3001/api/tools
+
+# Get system metrics
+curl http://localhost:3001/api/monitoring/metrics
 ```
 
 ## Step 6: Test Agent Execution
@@ -119,7 +134,7 @@ curl -X POST http://localhost:3001/api/agents/sales/execute \
 
 ### Direct CLI Testing (No Backend)
 
-You can test agents directly:
+You can test agents directly without the backend running:
 
 ```bash
 # Market Research Agent
@@ -130,9 +145,14 @@ python cli.py --input '{"action": "site_scan", "url": "https://example.com"}'
 cd backend/agents/sales_agent
 python cli.py --input '{"action": "generate_email", "recipientName": "Jane", "context": "Demo follow-up"}'
 
-# Dry run (validate input without executing)
+# Dry run (validate input without executing) - if supported
 python cli.py --input '{"action": "site_scan", "url": "https://example.com"}' --dry-run
 ```
+
+**Note**: Agents require environment variables (API keys) to be set. They will look for `.env` files in multiple locations:
+- `backend/agents/<agent_name>/.env`
+- `backend/agents/.env`
+- `backend/.env`
 
 ## Step 7: Start the Frontend
 
@@ -145,10 +165,18 @@ npm run dev
 Dashboard opens at http://localhost:5173
 
 **Active Pages:**
-- ✅ Dashboard Home - Real-time system metrics
-- ✅ Market Research Agent - Site scan with V2 engine
+- ✅ Dashboard Home - Real-time system metrics and overview
+- ✅ Market Research Agent - Site scan with V2 modular engine, SEO analysis, tech stack detection
 - ✅ Sales Agent - Email generation and lead qualification
-- ✅ Activity Logs - Live task execution history
+- ✅ Activity Logs - Live task execution history with pagination
+- 🔄 Support Agent - UI ready (implementation pending)
+- 🔄 HR Agent - UI ready (implementation pending)
+- 🔄 Legal Agent - UI ready (implementation pending)
+- 🔄 Finance Agent - UI ready (implementation pending)
+- 🔄 Marketing Agent - UI ready (implementation pending)
+- 🔄 Intelligence Agent - UI ready (implementation pending)
+- 🔄 Lead Sourcing Agent - UI ready (implementation pending)
+- 🔄 Workflows, Integrations, Settings - UI ready (implementation pending)
 
 ---
 
@@ -181,7 +209,21 @@ python cli.py --input '{"action": "site_scan", "url": "https://google.com"}'
 # Ensure backend/.env has:
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-your-key-here
+
+# OR for Anthropic:
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# OR for Ollama (local):
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3  # or mistral, qwen2.5, etc.
 ```
+
+**Note**: Agents read from `.env` files in this order:
+1. `backend/agents/<agent_name>/.env`
+2. `backend/agents/.env`
+3. `backend/.env`
 
 ### Database not initialized
 ```bash
@@ -215,7 +257,7 @@ docker-compose up -d    # Restart (will re-run init)
 └─────────────────┘
 ```
 
-**Key Insight**: No Redis workers! The Go backend spawns Python agents directly as subprocesses, capturing stdout as JSON output.
+**Key Insight**: No Redis workers or message queues! The Go backend spawns Python agents directly as subprocesses using `os/exec`, capturing stdout as JSON output. This simplifies architecture and makes debugging easier.
 
 ---
 
@@ -232,10 +274,21 @@ docker-compose up -d    # Restart (will re-run init)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/agents` | List all agents |
-| POST | `/api/agents/:name/execute` | Execute agent (e.g., `market_research`, `sales`) |
-| GET | `/api/tasks/:id` | Get task result |
+| GET | `/api/agents/:id` | Get agent by ID |
+| POST | `/api/agents/:name/execute` | Execute agent by type (e.g., `market_research`, `sales`) |
+| PUT | `/api/agents/:id` | Update agent configuration |
+| GET | `/api/agents/:id/metrics` | Get agent metrics and statistics |
+| GET | `/api/tasks` | List tasks (supports `?agentId=`, `?status=`, `?limit=`, `?offset=`) |
+| GET | `/api/tasks/:id` | Get task by ID |
+| GET | `/api/tasks/status/counts` | Get task counts by status |
+| POST | `/api/tasks/:id/mcc` | Save final MCC for a task |
 | GET | `/api/tools` | List available CLI tools |
+| GET | `/api/tools/:name` | Get tool configuration |
 | GET | `/api/monitoring/health` | Health check |
+| GET | `/api/monitoring/metrics` | System metrics |
+| GET | `/api/monitoring/activity` | Recent activity |
+| GET | `/api/monitoring/system` | System information |
+| GET | `/api/mccs` | Get Merchant Category Codes |
 
 ---
 

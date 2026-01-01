@@ -1,4 +1,8 @@
-# Market Research Agent - Status Update Fix
+# [ARCHIVED] Market Research Agent - Status Update Fix
+
+> **Note**: This document is archived. The issues described here have been resolved. This is kept for historical reference only. The current architecture uses CLI-based subprocess execution, not Redis workers.
+
+**Status**: ✅ Issues resolved
 
 ## Problems Identified
 
@@ -66,36 +70,34 @@ except Exception as e:
     raise  # This will update DB status to "failed"
 ```
 
-**Key Change**: Now **raises an exception** instead of returning a completed status with an error message. This ensures the `worker.py` properly updates the database with `status="failed"`.
+**Key Change**: Now **raises an exception** instead of returning a completed status with an error message. This ensures proper error handling.
+
+**Note**: The current architecture no longer uses `worker.py`. Agents are executed as CLI subprocesses by the Go backend.
 
 ---
 
-## How to Fix This
+## How to Fix This (Historical - No Longer Applicable)
 
-### Step 1: Kill ALL Market Research Agent Workers
+> **Note**: The worker-based architecture described below is no longer used. The current system uses CLI subprocess execution.
 
-You have **2 duplicate workers** running. **Stop both of them**:
+### Step 1: Kill ALL Market Research Agent Workers (Historical)
 
-1. Find the terminal windows running `python3 worker.py` in `/Users/ashish/Agent_X/agents/market_research_agent`
-2. Press `Ctrl+C` in **BOTH** terminal windows to stop them
-3. Verify they're stopped by checking there are no more parsing error loops
+~~You have **2 duplicate workers** running. **Stop both of them**:~~
 
-### Step 2: Start ONE Fresh Worker
+~~1. Find the terminal windows running `python3 worker.py` in `/Users/ashish/Agent_X/agents/market_research_agent`~~
+~~2. Press `Ctrl+C` in **BOTH** terminal windows to stop them~~
+~~3. Verify they're stopped by checking there are no more parsing error loops~~
 
-In a **single** terminal window:
+### Step 2: Start ONE Fresh Worker (Historical)
+
+~~In a **single** terminal window:~~
 
 ```bash
-cd /Users/ashish/Agent_X/agents/market_research_agent
-python3 worker.py
+# This is no longer how agents are executed
+# Agents are now spawned as subprocesses by the Go backend
 ```
 
-You should see:
-```
-Market Research Agent Worker started, listening on tasks:market_research
-Using LLM provider: ollama
-```
-
-### Step 3: Test the Fix
+### Step 3: Test the Fix (Current Method)
 
 1. **Submit a new site scan task** from the UI (use a simple URL like `https://example.com`)
 2. **Watch the terminal** - you should see:
@@ -212,14 +214,13 @@ You can now submit a new task from the UI.
 - If it fails parsing, it will mark the task as "Failed" instead of getting stuck.
 - The Sales Agent is also running with corrected configuration.
 
-### Cleanup and Pagination
+### Cleanup and Pagination (Completed)
 
-I have also implemented:
-1.  **Stuck Task Cleanup**: A script ran to mark tasks stuck in "processing" for >1 hour as "failed".
-2.  **Pagination**: The Market Research Agent history now supports pagination (10 items per page).
+✅ **Stuck Task Cleanup**: Script available at `backend/agents/cleanup_tasks.py` to mark tasks stuck in "processing" for >1 hour as "failed".
 
-**To Verify:**
-1.  Check the **Market Research Agent** dashboard.
-2.  Scroll down to "Research History".
-3.  You should see "Total: X" and "Previous/Next" buttons if you have more than 10 tasks.
-4.  Check the **Sales Agent** dashboard to ensure it still loads tasks correctly.
+✅ **Pagination**: The Market Research Agent history supports pagination (10 items per page). Backend API supports `?limit=` and `?offset=` query parameters.
+
+**Current Status:**
+- ✅ Pagination is implemented and working
+- ✅ Cleanup script is available for maintenance
+- ✅ All agents use CLI subprocess execution (no workers)
