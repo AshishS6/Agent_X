@@ -8,7 +8,7 @@ import os
 import json
 import ssl
 import socket
-import whois
+import requests
 import asyncio
 from datetime import datetime
 from urllib.parse import urlparse
@@ -24,6 +24,9 @@ from extractors.metadata import MetadataExtractor
 from analyzers.content_analyzer import ContentAnalyzer
 from analyzers.seo_analyzer import SEOAnalyzer
 from analyzers.change_detector import ChangeDetector
+from analyzers.change_intelligence import ChangeIntelligenceEngine
+from analyzers.compliance_intelligence import ComplianceIntelligence
+from analyzers.context_classifier import BusinessContextClassifier
 from reports.site_scan_report import SiteScanReportBuilder
 
 # Import new Crawl Orchestrator
@@ -41,6 +44,9 @@ class ModularScanEngine:
         self.logger = logger or logging.getLogger(__name__)
         self.orchestrator = CrawlOrchestrator(logger=self.logger)
         self.change_detector = ChangeDetector(logger=self.logger)
+        self.intelligence_engine = ChangeIntelligenceEngine(logger=self.logger)
+        self.compliance_engine = ComplianceIntelligence(logger=self.logger)
+        self.context_classifier = BusinessContextClassifier(logger=self.logger)
     
     def comprehensive_site_scan(self, url: str, business_name: str = "", task_id: str = None) -> str:
         """
@@ -91,8 +97,69 @@ class ModularScanEngine:
             # Comparison happens best at the end.
             previous_snapshot = self.change_detector.get_previous_snapshot(url)
             
-            # Get homepage data from page graph
+            # Check crawl success
             home_page = page_graph.get_page_by_type('home')
+            scan_success = False
+            scan_status = {
+                "status": "SUCCESS",
+                "reason": "OK",
+                "message": "Scan completed successfully",
+                "target_url": url, # For frontend redirect
+                "retryable": False
+            }
+
+            if not home_page:
+                scan_status["status"] = "FAILED"
+                scan_status["reason"] = "DNS_FAIL"
+                scan_status["message"] = "Could not resolve domain or connect to host."
+                scan_status["retryable"] = True
+            elif home_page.status != 200:
+                scan_status["status"] = "FAILED"
+                scan_status["target_url"] = home_page.final_url or url
+                if home_page.status in [403, 401]:
+                    scan_status["reason"] = "HTTP_403"
+                    scan_status["message"] = f"Access denied ({home_page.status}). The site blocked the scan."
+                    scan_status["retryable"] = False
+                elif home_page.status == 0: # Timeout or cert error usually
+                     if "SSL" in str(home_page.error):
+                         scan_status["reason"] = "SSL_ERROR"
+                         scan_status["message"] = "SSL Certificate handshake failed."
+                     else:
+                         scan_status["reason"] = "TIMEOUT"
+                         scan_status["message"] = "Connection timed out."
+                     scan_status["retryable"] = True
+                else:
+                    scan_status["reason"] = f"HTTP_{home_page.status}"
+                    scan_status["message"] = f"Website returned error status {home_page.status}"
+                    scan_status["retryable"] = True
+            elif len(page_graph.pages) <= 1:
+                 # Single page might be okay, but let's check
+                 scan_success = True
+            else:
+                 scan_success = True
+            
+            # Gating Logic
+            if scan_status["status"] != "SUCCESS":
+                 self.logger.warning(f"[V2.1] Scan Failed: {scan_status['reason']}")
+                 # Return limited report
+                 final_report = {
+                     "comprehensive_site_scan": {
+                            "scan_status": scan_status,
+                            "url": url,
+                            "final_url": scan_status.get("target_url", url),
+                            "timestamp": datetime.now().isoformat(),
+                            "crawl_metadata": {
+                                "pages_scanned": len(page_graph.pages),
+                                "duration": 0
+                            },
+                             # Empty placeholders to prevent frontend crashes if it ignores status check (backstop)
+                            "compliance_intelligence": None, 
+                            "business_context": None
+                     }
+                 }
+                 return json.dumps(final_report, indent=2)
+
+            # --- Proceed with Success Flow ---
             
             # Convert to legacy format for backward compatibility
             crawler = SiteCrawler()  # Keep for parse_html compatibility
@@ -108,6 +175,8 @@ class ModularScanEngine:
                     'redirect_count': 0
                 }
             else:
+                # This branch is now technically unreachable due to gating above, 
+                # but kept for logic consistency if we change gating later.
                 error_msg = home_page.error.message if home_page and home_page.error else 'Unknown error'
                 page_data = {
                     'success': False,
@@ -115,41 +184,28 @@ class ModularScanEngine:
                     'error': error_msg
                 }
             
-            if not page_data['success']:
-                compliance_data["general"]["pass"] = False
+            final_url = page_data['final_url']
+            response_headers = page_data.get('headers', {})
+            
+            # Add scan status to report
+            report_builder.report["scan_status"] = scan_status
+            
+            # Check status code (Legacy compliance data logic)
+            # We already validated 200 OK above for Success status.
+                
+            # Check redirects
+            if page_data['redirect_count'] > 1:
                 compliance_data["general"]["alerts"].append({
-                    "code": "CONNECTION_FAIL",
-                    "type": "Connectivity",
-                    "description": f"Failed to connect: {page_data.get('error', 'Unknown error')}"
+                    "code": "EXCESSIVE_REDIRECTS",
+                    "type": "Performance",
+                    "description": f"{page_data['redirect_count']} redirects detected."
                 })
-                final_url = url
-                response_headers = {}
-            else:
-                final_url = page_data['final_url']
-                response_headers = page_data.get('headers', {})
-                
-                # Check status code
-                if page_data['status_code'] != 200:
-                    compliance_data["general"]["pass"] = False
-                    compliance_data["general"]["alerts"].append({
-                        "code": "LIVENESS_FAIL",
-                        "type": "Availability",
-                        "description": f"Website returned status code {page_data['status_code']}"
-                    })
-                
-                # Check redirects
-                if page_data['redirect_count'] > 1:
-                    compliance_data["general"]["alerts"].append({
-                        "code": "EXCESSIVE_REDIRECTS",
-                        "type": "Performance",
-                        "description": f"{page_data['redirect_count']} redirects detected."
-                    })
             
             # Check SSL
             self._check_ssl(parsed_url, domain, compliance_data)
             
             # Check domain age
-            self._check_domain_age(domain, compliance_data)
+            domain_vintage_days = self._check_domain_age(domain, compliance_data)
             
             report_builder.add_compliance_data(compliance_data)
             
@@ -375,6 +431,30 @@ class ModularScanEngine:
                 # MCC Classification
                 mcc_data = self._classify_mcc(page_text)
                 report_builder.add_mcc_codes(mcc_data)
+                
+                # Phase E.1: Business Context Classification
+                self.logger.info("[V2.1] Classifying Business Context...")
+                business_context = self.context_classifier.classify(
+                    tech_stack,
+                    product_indicators,
+                    page_text,
+                    mcc_data,
+                    page_graph=page_graph
+                )
+                report_builder.report["business_context"] = business_context
+                
+                # Compliance Intelligence (Phase E + E.1)
+                self.logger.info("[V2.1] Running Context-Aware Compliance Intelligence...")
+                # Ensure we have all pieces. 'compliance_data' is updated by reference throughout.
+                # 'policy_pages' has details. 'content_risk' has keywords.
+                compliance_intel = self.compliance_engine.analyze(
+                    compliance_data,
+                    policy_pages,
+                    content_risk,
+                    domain_vintage_days,
+                    business_context
+                )
+                report_builder.add_compliance_intelligence(compliance_intel)
             
             # Build final report
             final_report = report_builder.build()
@@ -409,6 +489,10 @@ class ModularScanEngine:
             # Wrapping it inside comprehensive_site_scan to keep structure clean
             if "comprehensive_site_scan" in final_report:
                 final_report["comprehensive_site_scan"]["change_detection"] = change_report
+                
+                # Run Change Intelligence (Phase D)
+                intelligence_report = self.intelligence_engine.analyze_intelligence(change_report)
+                final_report["comprehensive_site_scan"]["change_intelligence"] = intelligence_report
             
             # Save new snapshot
             self.change_detector.save_snapshot(task_id, url, page_graph, final_report)
@@ -464,31 +548,71 @@ class ModularScanEngine:
             })
     
     def _check_domain_age(self, domain, compliance_data):
-        """Check domain age via WHOIS"""
+        """Check domain age via RDAP (more reliable/faster than WHOIS)"""
         try:
-            self.logger.info(f"[V2] Checking WHOIS for domain: {domain}")
-            w = whois.whois(domain)
-            creation_date = w.get('creation_date')
+            # RDAP lookups often fail with www prefix, so strip it
+            clean_domain = domain.lower()
+            if clean_domain.startswith('www.'):
+                clean_domain = clean_domain[4:]
+                
+            self.logger.info(f"[V2] Checking RDAP for domain: {clean_domain}")
             
-            if isinstance(creation_date, list):
-                creation_date = creation_date[0]
+            # 1. Try generic RDAP bootstrap
+            rdap_url = f"https://rdap.org/domain/{clean_domain}"
+            response = requests.get(rdap_url, timeout=5)
             
-            if creation_date:
-                if creation_date.tzinfo:
-                    now = datetime.now(creation_date.tzinfo)
+            # 2. Fallback for .com/.net if generic fails (often more reliable)
+            if response.status_code != 200 and (clean_domain.endswith('.com') or clean_domain.endswith('.net')):
+                self.logger.info(f"[V2] Generic RDAP failed, trying Verisign fallback...")
+                rdap_url = f"https://rdap.verisign.com/com/v1/domain/{clean_domain}" if clean_domain.endswith('.com') else f"https://rdap.verisign.com/net/v1/domain/{clean_domain}"
+                try:
+                    response = requests.get(rdap_url, timeout=5)
+                except Exception:
+                    pass # Keep original response if fallback errors out
+
+            if response.status_code == 200:
+                data = response.json()
+                events = data.get('events', [])
+                creation_date_str = None
+                
+                # Find registration/creation event
+                for event in events:
+                    if event.get('eventAction') in ['registration', 'creation', 'last changed']:
+                        creation_date_str = event.get('eventDate')
+                        if event.get('eventAction') == 'registration':
+                            break # Prefer registration date
+                
+                if creation_date_str:
+                    # Parse ISO format (e.g., 2020-05-15T10:00:00Z)
+                    creation_date_str = creation_date_str.replace('Z', '+00:00')
+                    creation_date = datetime.fromisoformat(creation_date_str)
+                    
+                    if creation_date.tzinfo:
+                        now = datetime.now(creation_date.tzinfo)
+                    else:
+                        now = datetime.now()
+                    
+                    age_days = (now - creation_date).days
+                    self.logger.info(f"[V2] Domain age: {age_days} days")
+                    
+                    if age_days < 365:
+                        compliance_data["general"]["alerts"].append({
+                            "code": "LOW_VINTAGE",
+                            "type": "Risk",
+                            "description": f"Domain is only {age_days} days old (less than 1 year)."
+                        })
+                    
+                    return age_days
                 else:
-                    now = datetime.now()
-                
-                age_days = (now - creation_date).days
-                
-                if age_days < 365:
-                    compliance_data["general"]["alerts"].append({
-                        "code": "LOW_VINTAGE",
-                        "type": "Risk",
-                        "description": f"Domain is only {age_days} days old (less than 1 year)."
-                    })
+                    self.logger.warning("[V2] RDAP response missing creation date")
+            else:
+                 self.logger.warning(f"[V2] RDAP lookup failed: {response.status_code}")
+                 
         except Exception as e:
-            self.logger.warning(f"[V2] WHOIS lookup failed: {e}")
+            # Swallow error to prevent scan failure from blocking
+            self.logger.warning(f"[V2] RDAP/Domain age check failed: {e}")
+            
+        return None
     
     def _update_payment_compliance(self, policy_pages, page_text, compliance_data):
         """Update payment terms compliance based on policies"""
@@ -576,10 +700,12 @@ class ModularScanEngine:
         for category, subcategories in mcc_database.items():
             for subcategory, codes in subcategories.items():
                 for mcc_code, details in codes.items():
+                    matched_kws = []
                     score = 0
                     for keyword in details["keywords"]:
                         if keyword in page_text:
                             score += 1
+                            matched_kws.append(keyword)
                     
                     if score > 0:
                         matched_mccs.append({
@@ -588,7 +714,7 @@ class ModularScanEngine:
                             "mcc_code": mcc_code,
                             "description": details["description"],
                             "confidence": min(score * 15, 100),
-                            "keywords_matched": score
+                            "keywords_matched": matched_kws
                         })
         
         # Sort by confidence

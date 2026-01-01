@@ -57,6 +57,10 @@ class SiteScanReportBuilder:
     def add_content_risk(self, risk_data: Dict[str, Any]) -> None:
         """Add content risk analysis"""
         self.report["content_risk"] = risk_data
+
+    def add_compliance_intelligence(self, intelligence_data: Dict[str, Any]) -> None:
+        """Add compliance intelligence (score & risk)"""
+        self.report["compliance_intelligence"] = intelligence_data
     
     def build(self) -> Dict[str, Any]:
         """

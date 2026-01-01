@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Globe, Search, Plus, Loader, AlertCircle, FileText, CheckCircle, XCircle, AlertTriangle, Eye, Download, Shield, CreditCard, ShoppingBag, Building, ExternalLink } from 'lucide-react';
+import { TrendingUp, Globe, Search, Plus, Loader, AlertCircle, FileText, CheckCircle, XCircle, AlertTriangle, Eye, Download, Shield, CreditCard, ShoppingBag, Building, ExternalLink, Activity, ArrowRight, AlertOctagon, Info, Lock } from 'lucide-react';
 import { AgentService, TaskService, Task, Agent } from '../services/api';
 import { FEATURES } from '../config/features';
 import TechStackCard from '../components/market-research/TechStackCard';
@@ -44,6 +44,84 @@ const MarketResearchAgent = () => {
         max_pages: 0,
         depth: 1
     });
+
+    // MCC Management State
+    const [mccList, setMccList] = useState<any[]>([]);
+    const [selectedMccValue, setSelectedMccValue] = useState<string>('');
+    const [overrideReason, setOverrideReason] = useState<string>('');
+    const [isSavingMcc, setIsSavingMcc] = useState(false);
+    const [saveMccSuccess, setSaveMccSuccess] = useState<string | null>(null);
+    const [saveMccError, setSaveMccError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (activeTab === 'mcc') {
+            fetchMccList();
+        }
+    }, [activeTab]);
+
+    // Pre-select primary suggested MCC when task opens
+    useEffect(() => {
+        if (selectedTask && selectedTask.output) {
+            try {
+                // Determine source: task.output might be string or object
+                const output = typeof selectedTask.output === 'string'
+                    ? JSON.parse(selectedTask.output)
+                    : selectedTask.output;
+
+                // If already finalized, load that
+                // TODO: Handle viewing existing final_mcc logic
+
+                // Default to primary suggestion
+                if (output?.comprehensive_site_scan?.mcc_codes?.primary_mcc?.mcc_code) {
+                    setSelectedMccValue(output.comprehensive_site_scan.mcc_codes.primary_mcc.mcc_code);
+                }
+            } catch (e) { console.error("Error parsing task output for MCC default", e); }
+        }
+    }, [selectedTask]);
+
+    const fetchMccList = async () => {
+        try {
+            const response = await fetch('http://localhost:3001/api/mccs?active=true');
+            const data = await response.json();
+            if (data.success) {
+                setMccList(data.data || []);
+            }
+        } catch (error) {
+            console.error("Failed to fetch MCCs", error);
+        }
+    };
+
+    const handleSaveMcc = async () => {
+        if (!selectedTask) return;
+        setIsSavingMcc(true);
+        setSaveMccSuccess(null);
+        setSaveMccError(null);
+
+        try {
+            const response = await fetch(`http://localhost:3001/api/tasks/${selectedTask.id}/mcc`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mcc_code: selectedMccValue,
+                    override_reason: overrideReason,
+                    source: 'manual', // Logic to determine if auto or manual can be refined
+                    selected_by: 'admin'
+                })
+            });
+            const result = await response.json();
+            if (result.success) {
+                setSaveMccSuccess("MCC Finalized Successfully");
+                // Refresh task to see updated status (optional)
+                fetchAgentAndTasks();
+            } else {
+                setSaveMccError(result.error || "Failed to save");
+            }
+        } catch (e) {
+            setSaveMccError("Failed to save connection error");
+        } finally {
+            setIsSavingMcc(false);
+        }
+    };
 
     useEffect(() => {
         fetchAgentAndTasks();
@@ -521,6 +599,7 @@ const MarketResearchAgent = () => {
                                                 { id: 'mcc', label: 'MCC codes', icon: CreditCard },
                                                 { id: 'product', label: 'Product details', icon: ShoppingBag },
                                                 { id: 'business', label: 'Business details', icon: Building },
+                                                { id: 'changes', label: 'Changes', icon: Activity },
                                             ].map((tab) => (
                                                 <button
                                                     key={tab.id}
@@ -552,6 +631,198 @@ const MarketResearchAgent = () => {
                                                                             {siteScan.error}
                                                                         </div>
                                                                     </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Phase E.1.1: Failure Gating & Compliance Dashboard */}
+                                                            {siteScan.scan_status?.status === 'FAILED' ? (
+                                                                <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-8 text-center animate-in fade-in slide-in-from-top-2">
+                                                                    <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/20">
+                                                                        <Lock className="text-red-400" size={32} />
+                                                                    </div>
+                                                                    <h3 className="text-xl font-bold text-white mb-2">Scan could not be completed</h3>
+                                                                    <p className="text-gray-400 mb-6 max-w-md mx-auto">
+                                                                        {siteScan.scan_status.message || "The website blocked access or could not be reached."}
+                                                                        <br />
+                                                                        <span className="text-sm text-gray-500 mt-2 block">
+                                                                            Reason: {siteScan.scan_status.reason} (This does not indicate a compliance violation)
+                                                                        </span>
+                                                                    </p>
+
+                                                                    {siteScan.scan_status.target_url && (
+                                                                        <a
+                                                                            href={siteScan.scan_status.target_url}
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors text-sm font-medium"
+                                                                        >
+                                                                            <ExternalLink size={16} />
+                                                                            Visit Website Manually
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            ) : siteScan.compliance_intelligence && (
+                                                                <div className="space-y-6 animate-in fade-in slide-in-from-top-2">
+                                                                    {/* Score Card */}
+                                                                    <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-6 relative overflow-hidden">
+                                                                        <div className="absolute top-0 right-0 p-4 opacity-10">
+                                                                            <Shield size={120} className="text-white" />
+                                                                        </div>
+
+                                                                        <div className="flex flex-col md:flex-row gap-8 relative z-10">
+                                                                            {/* Main Score */}
+                                                                            <div className="flex flex-col items-center justify-center min-w-[200px]">
+                                                                                <div className="relative w-32 h-32 flex items-center justify-center">
+                                                                                    <svg className="w-full h-full" viewBox="0 0 36 36">
+                                                                                        <path
+                                                                                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                                                            fill="none"
+                                                                                            stroke="#374151"
+                                                                                            strokeWidth="3"
+                                                                                        />
+                                                                                        <path
+                                                                                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                                                                            fill="none"
+                                                                                            stroke={
+                                                                                                siteScan.compliance_intelligence.score >= 80 ? '#4ade80' :
+                                                                                                    siteScan.compliance_intelligence.score >= 50 ? '#facc15' : '#f87171'
+                                                                                            }
+                                                                                            strokeWidth="3"
+                                                                                            strokeDasharray={`${siteScan.compliance_intelligence.score}, 100`}
+                                                                                            className="animate-[spin_1s_ease-out_reverse]"
+                                                                                        />
+                                                                                    </svg>
+                                                                                    <div className="absolute flex flex-col items-center">
+                                                                                        <span className="text-4xl font-bold text-white">{siteScan.compliance_intelligence.score}</span>
+                                                                                        <span className={`text-sm font-semibold uppercase tracking-wider ${siteScan.compliance_intelligence.rating === 'Good' ? 'text-green-400' :
+                                                                                            siteScan.compliance_intelligence.rating === 'Fair' ? 'text-yellow-400' : 'text-red-400'
+                                                                                            }`}>{siteScan.compliance_intelligence.rating}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <p className="text-xs text-gray-500 mt-2 text-center max-w-[150px] mb-2">
+                                                                                    Compliance Score
+                                                                                </p>
+                                                                                {siteScan.business_context ? (
+                                                                                    <div className="flex flex-col gap-2 items-center w-full">
+                                                                                        <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[10px] uppercase font-bold tracking-wider">
+                                                                                            <Building size={10} />
+                                                                                            {siteScan.business_context.primary.replace(/_/g, ' ')}
+                                                                                        </div>
+
+                                                                                        <div className="flex flex-wrap gap-1 justify-center">
+                                                                                            {/* Low Confidence Warning */}
+                                                                                            {(siteScan.business_context.status === 'LOW_CONFIDENCE' || siteScan.business_context.status === 'UNDETERMINED') && (
+                                                                                                <span className="text-[9px] text-yellow-500 bg-yellow-500/10 px-1.5 rounded border border-yellow-500/20 flex items-center gap-1">
+                                                                                                    <AlertTriangle size={8} />
+                                                                                                    Low Confidence
+                                                                                                </span>
+                                                                                            )}
+
+                                                                                            {/* Frontend Surface */}
+                                                                                            {siteScan.business_context.frontend_surface &&
+                                                                                                siteScan.business_context.frontend_surface !== 'UNKNOWN' &&
+                                                                                                siteScan.business_context.frontend_surface !== 'MARKETING_SITE' && (
+                                                                                                    <span className="text-[9px] text-purple-400 bg-purple-500/10 px-1.5 rounded border border-purple-500/20">
+                                                                                                        {siteScan.business_context.frontend_surface.replace(/_/g, ' ')}
+                                                                                                    </span>
+                                                                                                )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                ) : siteScan.compliance_intelligence.context && (
+                                                                                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[10px] uppercase font-bold tracking-wider">
+                                                                                        <Building size={10} />
+                                                                                        {siteScan.compliance_intelligence.context.replace(/_/g, ' ')}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+
+                                                                            {/* Breakdown */}
+                                                                            <div className="flex-1 space-y-5 justify-center flex flex-col">
+                                                                                {/* Technical */}
+                                                                                <div>
+                                                                                    <div className="flex justify-between text-sm mb-1">
+                                                                                        <span className="text-gray-300 font-medium">Technical Security</span>
+                                                                                        <span className="text-gray-400">{siteScan.compliance_intelligence.breakdown.technical.score}/{siteScan.compliance_intelligence.breakdown.technical.max}</span>
+                                                                                    </div>
+                                                                                    <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                                                                        <div
+                                                                                            className="h-full bg-blue-500 rounded-full transition-all duration-1000"
+                                                                                            style={{ width: `${(siteScan.compliance_intelligence.breakdown.technical.score / siteScan.compliance_intelligence.breakdown.technical.max) * 100}%` }}
+                                                                                        />
+                                                                                    </div>
+                                                                                    <div className="flex gap-2 mt-1 flex-wrap">
+                                                                                        {siteScan.compliance_intelligence.breakdown.technical.details.map((d: any, i: number) => (
+                                                                                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded border ${d.status === 'pass' || d.status.includes('Good') ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-300 border-red-500/20'}`}>
+                                                                                                {d.item}
+                                                                                            </span>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* Policy */}
+                                                                                <div>
+                                                                                    <div className="flex justify-between text-sm mb-1">
+                                                                                        <span className="text-gray-300 font-medium">Policy Completeness</span>
+                                                                                        <span className="text-gray-400">{siteScan.compliance_intelligence.breakdown.policy.score}/{siteScan.compliance_intelligence.breakdown.policy.max}</span>
+                                                                                    </div>
+                                                                                    <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                                                                        <div
+                                                                                            className="h-full bg-purple-500 rounded-full transition-all duration-1000 delay-100"
+                                                                                            style={{ width: `${(siteScan.compliance_intelligence.breakdown.policy.score / siteScan.compliance_intelligence.breakdown.policy.max) * 100}%` }}
+                                                                                        />
+                                                                                    </div>
+                                                                                    <div className="flex gap-2 mt-1 flex-wrap">
+                                                                                        {siteScan.compliance_intelligence.breakdown.policy.details.map((d: any, i: number) => (
+                                                                                            <span key={i} className={`text-[10px] px-1.5 py-0.5 rounded border ${d.status.includes('Found') ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                                                                                d.status.includes('Optional') ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20' :
+                                                                                                    d.status.includes('N/A') ? 'bg-gray-500/10 text-gray-400 border-gray-500/20' :
+                                                                                                        'bg-red-500/10 text-red-300 border-red-500/20'
+                                                                                                }`}>
+                                                                                                {d.item} {d.status.includes('N/A') && '(N/A)'}
+                                                                                            </span>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {/* Trust */}
+                                                                                <div>
+                                                                                    <div className="flex justify-between text-sm mb-1">
+                                                                                        <span className="text-gray-300 font-medium">Trust & Content Risk</span>
+                                                                                        <span className="text-gray-400">{siteScan.compliance_intelligence.breakdown.trust.score}/{siteScan.compliance_intelligence.breakdown.trust.max}</span>
+                                                                                    </div>
+                                                                                    <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                                                                        <div
+                                                                                            className="h-full bg-orange-500 rounded-full transition-all duration-1000 delay-200"
+                                                                                            style={{ width: `${(siteScan.compliance_intelligence.breakdown.trust.score / siteScan.compliance_intelligence.breakdown.trust.max) * 100}%` }}
+                                                                                        />
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Risk Flags Section */}
+                                                                    {siteScan.compliance_intelligence.risk_flags.length > 0 && (
+                                                                        <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-5">
+                                                                            <h3 className="text-red-400 font-bold flex items-center gap-2 mb-3">
+                                                                                <AlertOctagon size={20} />
+                                                                                Detected Risk Signals
+                                                                            </h3>
+                                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                                                {siteScan.compliance_intelligence.risk_flags.map((flag: any, idx: number) => (
+                                                                                    <div key={idx} className="bg-black/30 border border-red-500/30 rounded p-3 flex justify-between items-start">
+                                                                                        <div>
+                                                                                            <span className="text-xs font-bold text-red-300 uppercase tracking-wider block mb-1">{flag.type.replace('_', ' ')}</span>
+                                                                                            <p className="text-sm text-gray-300">{flag.message}</p>
+                                                                                        </div>
+                                                                                        <span className="text-xs font-bold bg-red-500/20 text-red-400 px-2 py-1 rounded">
+                                                                                            -{flag.penalty} pts
+                                                                                        </span>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             )}
                                                             {/* General Compliance Status */}
@@ -787,54 +1058,134 @@ const MarketResearchAgent = () => {
 
                                             {activeTab === 'mcc' && (
                                                 <div className="space-y-6">
-                                                    {/* MCC Selection */}
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                        {[displayData.mcc_codes?.primary_mcc, displayData.mcc_codes?.secondary_mcc].filter(Boolean).map((mcc: any, idx: number) => (
-                                                            <div key={idx} className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 relative overflow-hidden">
-                                                                <div className="flex items-start gap-3">
-                                                                    <div className="mt-1">
-                                                                        <CheckCircle className="text-green-500" size={20} />
-                                                                    </div>
-                                                                    <div>
-                                                                        <h4 className="font-bold text-white mb-1">MCC Number: {mcc.mcc_code}</h4>
-                                                                        <p className="text-sm text-gray-400">Found MCC code is matching with website content.</p>
-                                                                        <div className="mt-2 text-xs bg-green-500/10 text-green-400 px-2 py-1 rounded inline-block">
-                                                                            {mcc.confidence}% Confidence
+                                                    {/* System Suggestions */}
+                                                    <div>
+                                                        <h3 className="text-sm font-semibold text-gray-400 mb-3 uppercase tracking-wider">System Suggestions</h3>
+                                                        <div className="grid grid-cols-1 gap-4">
+                                                            {/* Primary Suggestion */}
+                                                            {displayData.mcc_codes?.primary_mcc && (
+                                                                <div className="bg-gray-800/50 border border-green-500/30 rounded-lg p-4 override-hidden">
+                                                                    <div className="flex items-start gap-4">
+                                                                        <div className="mt-1 flex-shrink-0">
+                                                                            <div className="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center text-green-500">
+                                                                                <CheckCircle size={18} />
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <h4 className="font-bold text-white text-lg break-words">
+                                                                                {displayData.mcc_codes.primary_mcc.mcc_code} - {displayData.mcc_codes.primary_mcc.description}
+                                                                            </h4>
+                                                                            <div className="text-sm text-gray-400 mt-1">
+                                                                                {displayData.mcc_codes.primary_mcc.category} / {displayData.mcc_codes.primary_mcc.subcategory}
+                                                                            </div>
+                                                                            <div className="mt-3 bg-gray-900/50 rounded p-3 text-sm border border-gray-700">
+                                                                                <span className="text-gray-500 block mb-1 text-xs uppercase">Reasoning</span>
+                                                                                {displayData.mcc_codes.primary_mcc.keywords_matched && Array.isArray(displayData.mcc_codes.primary_mcc.keywords_matched) ? (
+                                                                                    <div className="flex flex-wrap gap-2">
+                                                                                        {displayData.mcc_codes.primary_mcc.keywords_matched.map((kw: string, i: number) => (
+                                                                                            <span key={i} className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">{kw}</span>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                ) : (
+                                                                                    <span className="text-gray-400">High keyword match frequency on homepage.</span>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="flex-shrink-0 flex flex-col items-end">
+                                                                            <span className="text-[10px] bg-green-500/20 text-green-400 px-2 py-1 rounded border border-green-500/30 mb-2 whitespace-nowrap">Primary Match</span>
+                                                                            <div className="text-3xl font-bold text-green-400">{displayData.mcc_codes.primary_mcc.confidence}%</div>
+                                                                            <div className="text-xs text-gray-500">Confidence</div>
                                                                         </div>
                                                                     </div>
                                                                 </div>
-                                                            </div>
-                                                        ))}
+                                                            )}
+
+                                                            {/* Secondary Suggestion */}
+                                                            {displayData.mcc_codes?.secondary_mcc && (
+                                                                <div className="bg-gray-800/30 border border-gray-700 rounded-lg p-3 flex justify-between items-center">
+                                                                    <div className="flex gap-3 items-center">
+                                                                        <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-gray-400 font-mono text-xs">2nd</div>
+                                                                        <div>
+                                                                            <div className="font-bold text-gray-300">
+                                                                                {displayData.mcc_codes.secondary_mcc.mcc_code} - {displayData.mcc_codes.secondary_mcc.description}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="text-sm text-gray-500 font-medium">{displayData.mcc_codes.secondary_mcc.confidence}% Conf.</div>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
 
-                                                    {/* Detailed Description */}
-                                                    {displayData.mcc_codes?.primary_mcc && (
-                                                        <div className="bg-white text-gray-900 rounded-lg p-6 border border-gray-200">
-                                                            <div className="flex items-center gap-3 mb-4">
-                                                                <div className="w-4 h-4 rounded-full border-[5px] border-blue-600"></div>
-                                                                <h3 className="text-lg font-bold">{displayData.mcc_codes.primary_mcc.mcc_code} - {displayData.mcc_codes.primary_mcc.description}</h3>
+                                                    <div className="border-t border-gray-700 my-4"></div>
+
+                                                    {/* Manual Selection & Override */}
+                                                    <div className="bg-gray-900/40 border border-gray-700/50 rounded-lg p-6">
+                                                        <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-white">
+                                                            <Shield size={20} className="text-blue-500" />
+                                                            Final Decision
+                                                        </h3>
+
+                                                        {saveMccSuccess && (
+                                                            <div className="mb-4 p-3 bg-green-500/10 text-green-400 rounded border border-green-500/20 flex items-center gap-2">
+                                                                <CheckCircle size={16} /> {saveMccSuccess}
                                                             </div>
+                                                        )}
+                                                        {saveMccError && (
+                                                            <div className="mb-4 p-3 bg-red-500/10 text-red-400 rounded border border-red-500/20 flex items-center gap-2">
+                                                                <AlertCircle size={16} /> {saveMccError}
+                                                            </div>
+                                                        )}
 
-                                                            <div className="grid grid-cols-[150px_1fr] gap-y-4 text-sm">
-                                                                <div className="text-gray-500 font-medium">Category</div>
-                                                                <div className="font-medium">{displayData.mcc_codes.primary_mcc.category || 'Retail'}</div>
-
-                                                                <div className="text-gray-500 font-medium">Subcategory</div>
-                                                                <div className="font-medium">{displayData.mcc_codes.primary_mcc.subcategory || 'General'}</div>
-
-                                                                <div className="text-gray-500 font-medium">Description</div>
-                                                                <div className="text-gray-700">
-                                                                    Merchants classified with this MCC sell {displayData.mcc_codes.primary_mcc.description.toLowerCase()}.
+                                                        <div className="space-y-4">
+                                                            <div>
+                                                                <label className="block text-sm font-semibold text-gray-400 mb-1">Select Final MCC</label>
+                                                                <div className="relative">
+                                                                    <select
+                                                                        className="w-full p-2.5 border border-gray-700 rounded bg-gray-800 text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                                        value={selectedMccValue}
+                                                                        onChange={(e) => setSelectedMccValue(e.target.value)}
+                                                                    >
+                                                                        <option value="">-- Search and Select MCC --</option>
+                                                                        {mccList.map((mcc) => (
+                                                                            <option key={mcc.code} value={mcc.code}>
+                                                                                {mcc.code} - {mcc.description} ({mcc.category})
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
                                                                 </div>
                                                             </div>
-                                                        </div>
-                                                    )}
 
-                                                    {/* Feedback Section */}
-                                                    <div className="bg-blue-50/5 border border-blue-100/10 rounded-lg p-4">
-                                                        <div className="flex items-center gap-2 mb-3">
-                                                            <input type="radio" name="mcc_feedback" id="incorrect" className="text-blue-600" />
-                                                            <label htmlFor="incorrect" className="text-sm text-gray-300">Above MCCs are incorrect, please select the correct category and subcategory.</label>
+                                                            {selectedMccValue && displayData.mcc_codes?.primary_mcc?.mcc_code !== selectedMccValue && (
+                                                                <div className="animate-in fade-in slide-in-from-top-2">
+                                                                    <div className="flex items-start gap-2 p-3 bg-yellow-500/10 text-yellow-500 rounded border border-yellow-500/20 mb-3 text-sm">
+                                                                        <AlertTriangle size={16} className="mt-0.5" />
+                                                                        <div>
+                                                                            <strong className="block mb-1">Override Warning:</strong>
+                                                                            You are selecting an MCC that differs from the primary system suggestion.
+                                                                            Please provide a valid reasoning for this override.
+                                                                        </div>
+                                                                    </div>
+                                                                    <label className="block text-sm font-semibold text-gray-400 mb-1">Override Reason <span className="text-red-500">*</span></label>
+                                                                    <textarea
+                                                                        className="w-full p-2.5 border border-gray-700 rounded bg-gray-800 text-white focus:ring-2 focus:ring-blue-500 h-24 placeholder-gray-500"
+                                                                        placeholder="Explain why the system suggestion was rejected..."
+                                                                        value={overrideReason}
+                                                                        onChange={(e) => setOverrideReason(e.target.value)}
+                                                                    ></textarea>
+                                                                </div>
+                                                            )}
+
+                                                            <div className="pt-2">
+                                                                <button
+                                                                    onClick={handleSaveMcc}
+                                                                    disabled={isSavingMcc || !selectedMccValue || (selectedMccValue !== displayData.mcc_codes?.primary_mcc?.mcc_code && !overrideReason)}
+                                                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+                                                                >
+                                                                    {isSavingMcc ? <Loader className="animate-spin" size={16} /> : <CheckCircle size={16} />}
+                                                                    Confirm & Save Final MCC
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1062,6 +1413,112 @@ const MarketResearchAgent = () => {
                                                     )}
                                                 </div>
                                             )}
+
+                                            {activeTab === 'changes' && (
+                                                <div className="space-y-6">
+                                                    {/* Change Intelligence View */}
+                                                    {displayData.change_intelligence ? (
+                                                        <div className="space-y-6">
+                                                            {/* Summary Banner */}
+                                                            <div className={`p-6 rounded-lg border flex justify-between items-center ${displayData.change_intelligence.overall_severity === 'critical' ? 'bg-red-500/10 border-red-500/30' :
+                                                                displayData.change_intelligence.overall_severity === 'moderate' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                                                                    displayData.change_intelligence.overall_severity === 'minor' ? 'bg-blue-500/10 border-blue-500/30' :
+                                                                        'bg-gray-800/50 border-gray-700'
+                                                                }`}>
+                                                                <div>
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        {displayData.change_intelligence.overall_severity === 'critical' && <AlertOctagon className="text-red-500" size={24} />}
+                                                                        {displayData.change_intelligence.overall_severity === 'moderate' && <AlertTriangle className="text-yellow-500" size={24} />}
+                                                                        {displayData.change_intelligence.overall_severity === 'minor' && <Activity className="text-blue-500" size={24} />}
+                                                                        {displayData.change_intelligence.overall_severity === 'none' && <CheckCircle className="text-gray-400" size={24} />}
+
+                                                                        <h3 className={`text-lg font-bold capitalize ${displayData.change_intelligence.overall_severity === 'critical' ? 'text-red-400' :
+                                                                            displayData.change_intelligence.overall_severity === 'moderate' ? 'text-yellow-400' :
+                                                                                displayData.change_intelligence.overall_severity === 'minor' ? 'text-blue-400' :
+                                                                                    'text-gray-300'
+                                                                            }`}>
+                                                                            {displayData.change_intelligence.overall_severity} Change Severity
+                                                                        </h3>
+                                                                    </div>
+                                                                    <p className="text-white font-medium">{displayData.change_intelligence.summary}</p>
+                                                                </div>
+
+                                                                {/* Recommended Action Box */}
+                                                                {displayData.change_intelligence.recommended_action && (
+                                                                    <div className="bg-black/30 p-4 rounded-lg border border-white/10 max-w-md">
+                                                                        <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1">Recommended Action</label>
+                                                                        <p className="text-sm text-gray-200 flex items-start gap-2">
+                                                                            <ArrowRight size={16} className="mt-0.5 text-blue-400 flex-shrink-0" />
+                                                                            {displayData.change_intelligence.recommended_action}
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Change List */}
+                                                            <div>
+                                                                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                                                    <Activity className="text-blue-400" size={20} />
+                                                                    Detected Changes
+                                                                </h3>
+
+                                                                {displayData.change_intelligence.changes && displayData.change_intelligence.changes.length > 0 ? (
+                                                                    <div className="space-y-4">
+                                                                        {displayData.change_intelligence.changes.map((change: any, idx: number) => (
+                                                                            <div key={idx} className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-5 hover:border-blue-500/30 transition-colors">
+                                                                                <div className="flex justify-between items-start mb-3">
+                                                                                    <div className="flex items-center gap-3">
+                                                                                        <span className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded border ${change.severity === 'critical' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                                                                                            change.severity === 'moderate' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' :
+                                                                                                'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                                                                                            }`}>
+                                                                                            {change.severity}
+                                                                                        </span>
+                                                                                        <h4 className="font-bold text-gray-200 capitalize">
+                                                                                            {change.type.replace(/_/g, ' ')}
+                                                                                        </h4>
+                                                                                    </div>
+                                                                                    <div className="text-xs text-gray-500 font-mono">
+                                                                                        Conf: {(change.confidence * 100).toFixed(0)}%
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                <p className="text-gray-400 text-sm mb-3">
+                                                                                    {change.description}
+                                                                                </p>
+
+                                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-black/20 p-3 rounded">
+                                                                                    <div>
+                                                                                        <span className="text-gray-500 text-xs block mb-1">Business Impact</span>
+                                                                                        <span className="text-gray-300">{change.business_impact}</span>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <span className="text-gray-500 text-xs block mb-1">Recommended Action</span>
+                                                                                        <span className="text-gray-300">{change.recommended_action}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-center p-12 bg-gray-800/30 rounded-lg border border-gray-700/50 border-dashed">
+                                                                        <CheckCircle className="mx-auto text-gray-600 mb-3" size={32} />
+                                                                        <p className="text-gray-500">No significant changes detected in this scan.</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-center p-12">
+                                                            <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-700">
+                                                                <Activity size={24} className="text-gray-600" />
+                                                            </div>
+                                                            <h3 className="text-lg font-medium text-white mb-2">Change Detection Not Available</h3>
+                                                            <p className="text-gray-500">Run a new scan to enable change intelligence.</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 );
@@ -1091,57 +1548,59 @@ const MarketResearchAgent = () => {
                     </div>
 
                     {/* Site Preview Modal */}
-                    {isPreviewOpen && previewUrl && (
-                        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
-                            <div className="bg-white w-full max-w-5xl h-[85vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
-                                <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
-                                    <div className="flex items-center gap-4">
-                                        <div className="flex items-center gap-2">
-                                            <h3 className="font-bold text-gray-800">Preview Site</h3>
-                                            <span className="text-sm text-gray-500 px-2 py-0.5 bg-gray-200 rounded truncate max-w-[300px]">{previewUrl}</span>
+                    {
+                        isPreviewOpen && previewUrl && (
+                            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4">
+                                <div className="bg-white w-full max-w-5xl h-[85vh] rounded-xl flex flex-col overflow-hidden shadow-2xl">
+                                    <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+                                        <div className="flex items-center gap-4">
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-bold text-gray-800">Preview Site</h3>
+                                                <span className="text-sm text-gray-500 px-2 py-0.5 bg-gray-200 rounded truncate max-w-[300px]">{previewUrl}</span>
+                                            </div>
+                                            <a
+                                                href={previewUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded transition-colors"
+                                            >
+                                                <ExternalLink size={12} />
+                                                Open in New Tab
+                                            </a>
                                         </div>
-                                        <a
-                                            href={previewUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="flex items-center gap-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded transition-colors"
-                                        >
-                                            <ExternalLink size={12} />
-                                            Open in New Tab
-                                        </a>
+                                        <button onClick={() => setIsPreviewOpen(false)} className="text-gray-500 hover:text-gray-800">
+                                            <XCircle size={24} />
+                                        </button>
                                     </div>
-                                    <button onClick={() => setIsPreviewOpen(false)} className="text-gray-500 hover:text-gray-800">
-                                        <XCircle size={24} />
-                                    </button>
-                                </div>
-                                <div className="flex-1 bg-gray-100 relative">
-                                    <iframe
-                                        src={`http://localhost:3001/api/monitoring/proxy?url=${encodeURIComponent(previewUrl)}`}
-                                        className="w-full h-full border-0"
-                                        title="Site Preview"
-                                        sandbox="allow-same-origin allow-scripts"
-                                    />
-                                    {/* Troubleshooting info for blocked iframes */}
-                                    <div className="absolute inset-0 -z-10 flex flex-col items-center justify-center p-8 text-center bg-gray-50">
-                                        <AlertTriangle size={48} className="text-yellow-500 mb-4" />
-                                        <h4 className="text-lg font-bold text-gray-800 mb-2">Preview Blocked by Site</h4>
-                                        <p className="text-gray-600 max-w-md mb-6">
-                                            Some websites (like Razorpay) prevent themselves from being embedded for security reasons.
-                                        </p>
-                                        <a
-                                            href={previewUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="px-6 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-lg transition-colors flex items-center gap-2"
-                                        >
-                                            <ExternalLink size={16} />
-                                            Open in Browser to View
-                                        </a>
+                                    <div className="flex-1 bg-gray-100 relative">
+                                        <iframe
+                                            src={`http://localhost:3001/api/monitoring/proxy?url=${encodeURIComponent(previewUrl)}`}
+                                            className="w-full h-full border-0"
+                                            title="Site Preview"
+                                            sandbox="allow-same-origin allow-scripts"
+                                        />
+                                        {/* Troubleshooting info for blocked iframes */}
+                                        <div className="absolute inset-0 -z-10 flex flex-col items-center justify-center p-8 text-center bg-gray-50">
+                                            <AlertTriangle size={48} className="text-yellow-500 mb-4" />
+                                            <h4 className="text-lg font-bold text-gray-800 mb-2">Preview Blocked by Site</h4>
+                                            <p className="text-gray-600 max-w-md mb-6">
+                                                Some websites (like Razorpay) prevent themselves from being embedded for security reasons.
+                                            </p>
+                                            <a
+                                                href={previewUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="px-6 py-2 bg-gray-800 hover:bg-gray-900 text-white rounded-lg transition-colors flex items-center gap-2"
+                                            >
+                                                <ExternalLink size={16} />
+                                                Open in Browser to View
+                                            </a>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
+                        )
+                    }
                 </div>
             )}
         </div>

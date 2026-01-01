@@ -11,6 +11,8 @@ import (
 	"go-backend/internal/database"
 	"go-backend/internal/handlers"
 	"go-backend/internal/middleware"
+	"go-backend/internal/models"
+	"go-backend/internal/seed"
 	"go-backend/internal/tools"
 
 	"github.com/gin-gonic/gin"
@@ -33,7 +35,7 @@ func main() {
 	// Get project root (parent of go-backend)
 	cwd, _ := os.Getwd()
 	projectRoot := filepath.Dir(cwd)
-	if filepath.Base(cwd) != "go-backend" {
+	if filepath.Base(cwd) != "go-backend" && filepath.Base(cwd) != "backend" {
 		// If running from project root, use current directory
 		projectRoot = cwd
 	}
@@ -63,6 +65,18 @@ func main() {
 	tasksHandler := handlers.NewTasksHandler()
 	monitoringHandler := handlers.NewMonitoringHandler(executor)
 	toolsHandler := handlers.NewToolsHandler()
+	mccHandler := handlers.NewMccHandler()
+
+	// Initialize MCC Tables & Seed Data
+	if err := models.InitMccTables(); err != nil {
+		log.Printf("⚠️ Failed to initialize MCC tables: %v", err)
+	} else {
+		// Run Seeder
+		jsonPath := filepath.Join(projectRoot, "database", "mcc_master.json")
+		if err := seed.SeedMccCodes(database.DB, jsonPath); err != nil {
+			log.Printf("⚠️ Failed to seed MCC codes (could be harmless if file missing or already seeded): %v", err)
+		}
+	}
 
 	// Root endpoint
 	router.GET("/", func(c *gin.Context) {
@@ -76,6 +90,7 @@ func main() {
 				"tools":      "/api/tools",
 				"monitoring": "/api/monitoring",
 				"health":     "/api/monitoring/health",
+				"mccs":       "/api/mccs",
 			},
 		})
 	})
@@ -99,7 +114,13 @@ func main() {
 			tasks.GET("", tasksHandler.GetAll)
 			tasks.GET("/status/counts", tasksHandler.GetStatusCounts)
 			tasks.GET("/:id", tasksHandler.GetByID)
+
+			// MCC Sub-routes for tasks
+			tasks.POST("/:id/mcc", mccHandler.SaveFinalMcc)
 		}
+
+		// MCC Routes
+		api.GET("/mccs", mccHandler.GetMccs)
 
 		// Tools routes (new endpoint)
 		toolsGroup := api.Group("/tools")
@@ -141,6 +162,7 @@ func main() {
 	log.Printf("   - Agents: http://localhost:%s/api/agents", cfg.Port)
 	log.Printf("   - Tasks:  http://localhost:%s/api/tasks", cfg.Port)
 	log.Printf("   - Tools:  http://localhost:%s/api/tools", cfg.Port)
+	log.Printf("   - MCCs:   http://localhost:%s/api/mccs", cfg.Port)
 	log.Println("")
 
 	if err := router.Run(addr); err != nil {
