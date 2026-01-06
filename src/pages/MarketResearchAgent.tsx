@@ -5,6 +5,7 @@ import { FEATURES } from '../config/features';
 import TechStackCard from '../components/market-research/TechStackCard';
 import SEOHealthCard from '../components/market-research/SEOHealthCard';
 import BusinessMetadataV2 from '../components/market-research/BusinessMetadataV2';
+import ReportDownloadButton from '../components/market-research/ReportDownloadButton';
 
 const MarketResearchAgent = () => {
     const [agent, setAgent] = useState<Agent | null>(null);
@@ -534,9 +535,15 @@ const MarketResearchAgent = () => {
                                     <span>{new Date(selectedTask.createdAt).toLocaleString()}</span>
                                 </div>
                             </div>
-                            <button onClick={() => setIsReportModalOpen(false)} className="text-gray-400 hover:text-white transition-colors">
-                                <XCircle size={28} />
-                            </button>
+                            <div className="flex items-center gap-3">
+                                <ReportDownloadButton 
+                                    taskId={selectedTask.id}
+                                    taskStatus={selectedTask.status}
+                                />
+                                <button onClick={() => setIsReportModalOpen(false)} className="text-gray-400 hover:text-white transition-colors">
+                                    <XCircle size={28} />
+                                </button>
+                            </div>
                         </div>
 
                         {/* Content */}
@@ -1523,27 +1530,6 @@ const MarketResearchAgent = () => {
                                     </div>
                                 );
                             })()}
-                        </div>
-
-                        {/* Footer */}
-                        <div className="p-4 border-t border-gray-800 flex justify-end gap-3 bg-gray-900/50">
-                            <button
-                                onClick={() => setIsReportModalOpen(false)}
-                                className="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium transition-colors"
-                            >
-                                Close
-                            </button>
-                            <button
-                                onClick={() => {
-                                    const content = JSON.stringify(selectedTask.output, null, 2);
-                                    navigator.clipboard.writeText(content);
-                                    alert('Report copied to clipboard!');
-                                }}
-                                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
-                            >
-                                <Download size={16} />
-                                Download Report
-                            </button>
                         </div>
                     </div>
 

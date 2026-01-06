@@ -41,6 +41,13 @@ func main() {
 	}
 	log.Printf("📁 Project root: %s", projectRoot)
 
+	// Initialize tool registry with configurable timeouts
+	tools.InitRegistry(cfg.MarketResearchTimeout, cfg.SalesAgentTimeout)
+	log.Printf("🔧 Tool timeouts configured - Market Research: %v, Sales: %v",
+		cfg.MarketResearchTimeout,
+		cfg.SalesAgentTimeout,
+	)
+
 	// Create executor with hybrid concurrency control
 	executor := tools.NewExecutor(
 		cfg.GlobalConcurrencyLimit,
@@ -62,7 +69,7 @@ func main() {
 
 	// Initialize handlers
 	agentsHandler := handlers.NewAgentsHandler(executor)
-	tasksHandler := handlers.NewTasksHandler()
+	tasksHandler := handlers.NewTasksHandler(executor)
 	monitoringHandler := handlers.NewMonitoringHandler(executor)
 	toolsHandler := handlers.NewToolsHandler()
 	mccHandler := handlers.NewMccHandler()
@@ -114,6 +121,7 @@ func main() {
 			tasks.GET("", tasksHandler.GetAll)
 			tasks.GET("/status/counts", tasksHandler.GetStatusCounts)
 			tasks.GET("/:id", tasksHandler.GetByID)
+			tasks.GET("/:id/report", tasksHandler.DownloadReport)
 
 			// MCC Sub-routes for tasks
 			tasks.POST("/:id/mcc", mccHandler.SaveFinalMcc)

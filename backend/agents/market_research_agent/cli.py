@@ -19,6 +19,7 @@ import json
 import argparse
 import logging
 import uuid
+import base64
 from typing import Dict, Any
 
 # Add parent directories to path for imports
@@ -75,6 +76,90 @@ def run_agent(action: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
     # Get LLM provider from environment
     llm_provider = os.getenv("LLM_PROVIDER", os.getenv("DEFAULT_LLM_PROVIDER", "openai"))
     logger.info(f"Using LLM provider: {llm_provider}")
+    
+    # Report download action
+    if action == "download_report":
+        from reports.json_builder import JSONBuilder
+        from reports.markdown_builder import MarkdownBuilder
+        from reports import get_pdf_builder
+        
+        task_id = input_data.get("task_id")
+        format_type = input_data.get("format", "json").lower()
+        scan_data = input_data.get("scan_data", {})
+        
+        if not task_id:
+            return {
+                "status": "failed",
+                "error": "Missing required field: task_id",
+                "output": None
+            }
+        
+        if not scan_data:
+            return {
+                "status": "failed",
+                "error": "Missing required field: scan_data",
+                "output": None
+            }
+        
+        if format_type not in ["pdf", "json", "markdown"]:
+            return {
+                "status": "failed",
+                "error": f"Invalid format: {format_type}. Must be pdf, json, or markdown",
+                "output": None
+            }
+        
+        try:
+            logger.info(f"Generating {format_type} report for task {task_id}")
+            
+            if format_type == "pdf":
+                PDFBuilder = get_pdf_builder()
+                builder = PDFBuilder()
+                pdf_bytes = builder.build(scan_data, task_id)
+                # Encode as base64 for JSON transport
+                pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+                return {
+                    "status": "completed",
+                    "output": {
+                        "format": "pdf",
+                        "content": pdf_base64,
+                        "content_type": "application/pdf"
+                    },
+                    "error": None
+                }
+            
+            elif format_type == "json":
+                builder = JSONBuilder()
+                json_content = builder.build(scan_data, task_id)
+                return {
+                    "status": "completed",
+                    "output": {
+                        "format": "json",
+                        "content": json_content,
+                        "content_type": "application/json"
+                    },
+                    "error": None
+                }
+            
+            elif format_type == "markdown":
+                builder = MarkdownBuilder()
+                md_content = builder.build(scan_data, task_id)
+                return {
+                    "status": "completed",
+                    "output": {
+                        "format": "markdown",
+                        "content": md_content,
+                        "content_type": "text/markdown"
+                    },
+                    "error": None
+                }
+        
+        except Exception as e:
+            logger.error(f"Report generation failed: {e}", exc_info=True)
+            return {
+                "status": "failed",
+                "error": f"Report generation failed: {str(e)}",
+                "output": None
+            }
     
     # Site scans use V2 modular engine (includes tech_stack & seo_analysis)
     if action in ["comprehensive_site_scan", "site_scan"]:
@@ -143,6 +228,9 @@ Examples:
   
   Web search:
     python cli.py --input '{"action": "web_search", "query": "AI startups 2024"}'
+  
+  Download report:
+    python cli.py --input '{"action": "download_report", "task_id": "uuid", "format": "pdf", "scan_data": {...}}'
 """
     )
     parser.add_argument(

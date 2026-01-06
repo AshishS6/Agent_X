@@ -130,6 +130,44 @@ export const TaskService = {
         const response = await api.get<{ data: any }>(`/tasks/${id}`);
         return mapTaskFromApi(response.data.data);
     },
+
+    downloadReport: async (taskId: string, format: 'pdf' | 'json' | 'markdown'): Promise<void> => {
+        const response = await api.get(`/tasks/${taskId}/report`, {
+            params: { format },
+            responseType: 'blob'
+        });
+
+        // Create blob URL and trigger download
+        const blob = new Blob([response.data]);
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        
+        // Extract filename from Content-Disposition header if available
+        const contentDisposition = response.headers['content-disposition'];
+        let filename = `report_${taskId}.${format === 'markdown' ? 'md' : format}`;
+        if (contentDisposition) {
+            // Try quoted filename first: filename="file.md"
+            let filenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+            if (!filenameMatch) {
+                // Try unquoted: filename=file.md
+                filenameMatch = contentDisposition.match(/filename=([^;]+)/i);
+            }
+            if (filenameMatch) {
+                filename = filenameMatch[1].trim();
+                // Ensure markdown files have .md extension
+                if (format === 'markdown' && !filename.endsWith('.md')) {
+                    filename = filename.replace(/\.[^.]+$/, '') + '.md';
+                }
+            }
+        }
+        
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    },
 };
 
 export const MonitoringService = {

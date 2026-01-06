@@ -18,39 +18,45 @@ type ToolConfig struct {
 
 // Registry holds all available tools
 // Tool names are used in API paths: /api/agents/{name}/execute
-var Registry = map[string]ToolConfig{
-	"market_research": {
-		Name:             "Market Research Agent",
-		Description:      "Comprehensive site scan, competitor analysis, and compliance monitoring",
-		Command:          "python3",
-		Args:             []string{"backend/agents/market_research_agent/cli.py"},
-		Timeout:          5 * time.Minute,
-		WorkingDir:       ".",
-		ConcurrencyLimit: 5,
-		AgentType:        "market_research",
-	},
-	"sales": {
-		Name:             "Sales Agent",
-		Description:      "Lead qualification, email outreach, and meeting scheduling automation",
-		Command:          "python3",
-		Args:             []string{"backend/agents/sales_agent/cli.py"},
-		Timeout:          3 * time.Minute,
-		WorkingDir:       ".",
-		ConcurrencyLimit: 5,
-		AgentType:        "sales",
-	},
-	// Add more tools here as needed...
-	// Example:
-	// "seo-analyzer": {
-	//     Name:             "SEO Analyzer",
-	//     Description:      "Analyze website SEO and provide recommendations",
-	//     Command:          "python",
-	//     Args:             []string{"agents/seo_analyzer_agent/cli.py"},
-	//     Timeout:          2 * time.Minute,
-	//     WorkingDir:       ".",
-	//     ConcurrencyLimit: 3,
-	//     AgentType:        "seo-analyzer",
-	// },
+var Registry = map[string]ToolConfig{}
+
+// InitRegistry initializes the tool registry with configurable timeouts
+// This should be called from main.go after loading configuration
+func InitRegistry(marketResearchTimeout, salesAgentTimeout time.Duration) {
+	Registry = map[string]ToolConfig{
+		"market_research": {
+			Name:             "Market Research Agent",
+			Description:      "Comprehensive site scan, competitor analysis, and compliance monitoring",
+			Command:          "python3",
+			Args:             []string{"backend/agents/market_research_agent/cli.py"},
+			Timeout:          marketResearchTimeout,
+			WorkingDir:       ".",
+			ConcurrencyLimit: 5,
+			AgentType:        "market_research",
+		},
+		"sales": {
+			Name:             "Sales Agent",
+			Description:      "Lead qualification, email outreach, and meeting scheduling automation",
+			Command:          "python3",
+			Args:             []string{"backend/agents/sales_agent/cli.py"},
+			Timeout:          salesAgentTimeout,
+			WorkingDir:       ".",
+			ConcurrencyLimit: 5,
+			AgentType:        "sales",
+		},
+		// Add more tools here as needed...
+		// Example:
+		// "seo-analyzer": {
+		//     Name:             "SEO Analyzer",
+		//     Description:      "Analyze website SEO and provide recommendations",
+		//     Command:          "python",
+		//     Args:             []string{"agents/seo_analyzer_agent/cli.py"},
+		//     Timeout:          2 * time.Minute,
+		//     WorkingDir:       ".",
+		//     ConcurrencyLimit: 3,
+		//     AgentType:        "seo-analyzer",
+		// },
+	}
 }
 
 // GetTool retrieves a tool by name
