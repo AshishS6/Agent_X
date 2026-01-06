@@ -10,6 +10,8 @@ import ssl
 import socket
 import requests
 import asyncio
+import uuid
+import time
 from datetime import datetime
 from urllib.parse import urlparse
 import re
@@ -55,11 +57,20 @@ class ModularScanEngine:
         Args:
             url: Website URL to scan
             business_name: Business/Billing name (optional)
+            task_id: Task ID for scan tracking (optional)
             
         Returns:
             JSON string with comprehensive scan results
         """
+        # Generate scan_id from task_id or create UUID
+        scan_id = task_id if task_id else str(uuid.uuid4())[:8]
+        scan_start_time = time.monotonic()
+        scan_start_timestamp = datetime.now().isoformat()
+        
         try:
+            # Phase 1: Scan Start
+            self.logger.info(f"[SCAN][{scan_id}][START] Scan started - root_url={url}, timestamp={scan_start_timestamp}")
+            
             # Clean URL input
             cleaned_url = self._clean_url(url)
             url = cleaned_url
@@ -89,7 +100,13 @@ class ModularScanEngine:
             
             # Use CrawlOrchestrator for parallel page discovery
             self.logger.info("[V2.1] Running CrawlOrchestrator...")
-            page_graph = asyncio.run(self.orchestrator.crawl(url))
+            crawl_start_time = time.monotonic()
+            page_graph = asyncio.run(self.orchestrator.crawl(url, scan_id=scan_id))
+            crawl_duration = time.monotonic() - crawl_start_time
+            
+            # Phase 10: Post-Crawl Analysis Start
+            post_crawl_start_time = time.monotonic()
+            self.logger.info(f"[SCAN][{scan_id}][POST_CRAWL] Post-crawl analysis started")
             
             # Change Detection: Fetch previous snapshot (before processing logic if we wanted, but we leverage page graph content hash)
             # We can construct a partial current snapshot object for comparison 
@@ -201,11 +218,20 @@ class ModularScanEngine:
                     "description": f"{page_data['redirect_count']} redirects detected."
                 })
             
+            # Phase 11: Compliance Checks
+            compliance_start_time = time.monotonic()
+            self.logger.info(f"[SCAN][{scan_id}][COMPLIANCE] Compliance checks started")
+            
             # Check SSL
             self._check_ssl(parsed_url, domain, compliance_data)
             
             # Check domain age
             domain_vintage_days = self._check_domain_age(domain, compliance_data)
+            
+            compliance_duration = time.monotonic() - compliance_start_time
+            compliance_passed = compliance_data["general"]["pass"] and compliance_data["payment_terms"]["pass"]
+            compliance_summary = f"general={'pass' if compliance_data['general']['pass'] else 'fail'}, payment_terms={'pass' if compliance_data['payment_terms']['pass'] else 'fail'}"
+            self.logger.info(f"[SCAN][{scan_id}][COMPLIANCE] Compliance checks completed in {compliance_duration:.2f}s - {compliance_summary}")
             
             report_builder.add_compliance_data(compliance_data)
             
@@ -494,12 +520,29 @@ class ModularScanEngine:
                 intelligence_report = self.intelligence_engine.analyze_intelligence(change_report)
                 final_report["comprehensive_site_scan"]["change_intelligence"] = intelligence_report
             
-            # Save new snapshot
+            # Phase 12: Snapshot / Persistence
+            snapshot_start_time = time.monotonic()
+            self.logger.info(f"[SCAN][{scan_id}][SNAPSHOT] Saving snapshot...")
             self.change_detector.save_snapshot(task_id, url, page_graph, final_report)
+            snapshot_duration = time.monotonic() - snapshot_start_time
+            self.logger.info(f"[SCAN][{scan_id}][SNAPSHOT] Snapshot saved in {snapshot_duration:.2f}s")
+            
+            # Phase 10: Post-Crawl Analysis End
+            post_crawl_duration = time.monotonic() - post_crawl_start_time
+            self.logger.info(f"[SCAN][{scan_id}][POST_CRAWL] Post-crawl analysis completed in {post_crawl_duration:.2f}s")
+            
+            # Phase 13: Scan Completion Summary
+            total_scan_duration = time.monotonic() - scan_start_time
+            timeout_buffer = self.orchestrator.TOTAL_TIMEOUT - crawl_duration if hasattr(self.orchestrator, 'TOTAL_TIMEOUT') else None
+            
+            self.logger.info(f"[SCAN][{scan_id}][SUMMARY] Scan completed - total_duration={total_scan_duration:.2f}s, crawl_duration={crawl_duration:.2f}s, post_processing_duration={post_crawl_duration:.2f}s" + 
+                           (f", timeout_buffer={timeout_buffer:.2f}s" if timeout_buffer is not None and timeout_buffer > 0 else ""))
             
             return json.dumps(final_report, indent=2)
             
         except Exception as e:
+            if 'scan_id' in locals():
+                self.logger.error(f"[SCAN][{scan_id}][ERROR] Comprehensive scan failed: {e}", exc_info=True)
             self.logger.error(f"[V2.1] Comprehensive scan failed: {e}", exc_info=True)
             return json.dumps({"error": str(e), "url": url})
     

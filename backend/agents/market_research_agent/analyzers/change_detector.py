@@ -107,8 +107,12 @@ class ChangeDetector:
         """
         Save the current scan state as a snapshot.
         """
+        import time
+        snapshot_start = time.monotonic()
+        
         try:
             # key extraction from page_graph
+            self.logger.debug(f"[SNAPSHOT] Extracting page hashes...")
             page_hashes = {}
             # Assuming page_graph has a way to iterate pages or get by type
             # We will use the ones we care about
@@ -119,6 +123,7 @@ class ChangeDetector:
                     page_hashes[p_type] = page.content_hash
             
             # Extract key signals from the final report
+            self.logger.debug(f"[SNAPSHOT] Extracting derived signals...")
             # The report structure follows SiteScanReportBuilder
             # it wraps in comprehensive_site_scan usually
             data = report.get('comprehensive_site_scan', report)
@@ -129,8 +134,15 @@ class ChangeDetector:
                 'extracted_products': product_details.get('extracted_products', [])
             }
             
+            self.logger.debug(f"[SNAPSHOT] Connecting to database...")
+            db_connect_start = time.monotonic()
             with get_db_connection() as conn:
+                db_connect_time = time.monotonic() - db_connect_start
+                self.logger.debug(f"[SNAPSHOT] Database connection established in {db_connect_time:.2f}s")
+                
                 with conn.cursor() as cur:
+                    self.logger.debug(f"[SNAPSHOT] Executing INSERT statement...")
+                    insert_start = time.monotonic()
                     cur.execute("""
                         INSERT INTO site_scan_snapshots 
                         (task_id, target_url, page_hashes, derived_signals)
@@ -141,7 +153,13 @@ class ChangeDetector:
                         Json(page_hashes), 
                         Json(derived_signals)
                     ))
-                    self.logger.info(f"[SNAPSHOT] Saved snapshot for {target_url}")
+                    insert_time = time.monotonic() - insert_start
+                    self.logger.debug(f"[SNAPSHOT] INSERT completed in {insert_time:.2f}s")
+                    
+                    conn.commit()
+                    total_time = time.monotonic() - snapshot_start
+                    self.logger.info(f"[SNAPSHOT] Saved snapshot for {target_url} in {total_time:.2f}s (db_connect={db_connect_time:.2f}s, insert={insert_time:.2f}s)")
                     
         except Exception as e:
-            self.logger.warning(f"Failed to save snapshot: {e}")
+            total_time = time.monotonic() - snapshot_start
+            self.logger.warning(f"[SNAPSHOT] Failed to save snapshot after {total_time:.2f}s: {e}", exc_info=True)
