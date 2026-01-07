@@ -2,11 +2,13 @@
 Compliance Intelligence Engine
 Calculates unified Compliance Score and Risk Flags based on technical, policy, and content signals.
 Phase E.1: Context-Aware Complinace
+Per PRD V2.1.1: Compliance score is Advisory, must show breakdown, each penalty references specific signal.
 """
 
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from analyzers.context_classifier import BusinessContextClassifier
+from analyzers.signal_classifier import SignalClassifier
 
 class ComplianceIntelligence:
     """
@@ -45,9 +47,26 @@ class ComplianceIntelligence:
         ssl_issues = [a for a in alerts if a.get('code') in ['NO_HTTPS', 'SSL_ERROR']]
         if not ssl_issues:
             tech_score += 15
-            tech_breakdown.append({"item": "SSL Certificate", "score": 15, "max": 15, "status": "pass"})
+            tech_breakdown.append({
+                "item": "SSL Certificate",
+                "score": 15,
+                "max": 15,
+                "status": "pass",
+                "signal_reference": "ssl_https_presence",
+                "signal_type": SignalClassifier.classify_signal("ssl_https_presence")
+            })
         else:
-            tech_breakdown.append({"item": "SSL Certificate", "score": 0, "max": 15, "status": "fail", "reason": "No valid HTTPS detected"})
+            ssl_alert = ssl_issues[0]
+            tech_breakdown.append({
+                "item": "SSL Certificate",
+                "score": 0,
+                "max": 15,
+                "status": "fail",
+                "reason": "No valid HTTPS detected",
+                "signal_reference": "ssl_https_presence",
+                "signal_type": SignalClassifier.classify_signal("ssl_https_presence"),
+                "triggering_alert": ssl_alert.get('code', 'NO_HTTPS')
+            })
 
         # Domain Age
         age_score = 0
@@ -149,14 +168,29 @@ class ComplianceIntelligence:
                     reasons.append("Not applicable")
 
             policy_score += item_score
-            policy_breakdown.append({
+            
+            # Add signal reference and evidence if available
+            # Per PRD V2.1.1: Policy detection must show expectation state (Required/Optional/N/A)
+            breakdown_item = {
                 "item": name,
                 "score": item_score,
                 "max": 10,
                 "status": status_label,
-                "expectation": expectation,
-                "notes": ", ".join(reasons)
-            })
+                "expectation": expectation,  # Required/Optional/Not Applicable
+                "expectation_state": expectation,  # Per PRD: Explicit expectation state
+                "notes": ", ".join(reasons),
+                "signal_reference": "policy_page_presence",
+                "signal_type": SignalClassifier.classify_signal("policy_page_presence"),
+                # Per PRD: Show detection status and source URL if detected
+                "detection_status": "detected" if p_data.get('found') else "not_detected",
+                "source_url": p_data.get('url', '') if p_data.get('found') else None
+            }
+            
+            # Add evidence if policy was found
+            if p_data.get('found') and p_data.get('evidence'):
+                breakdown_item["evidence"] = p_data.get('evidence')
+            
+            policy_breakdown.append(breakdown_item)
             
         
         # 3. Trust & Risk (Max 30) - Context Conditioned
@@ -166,41 +200,85 @@ class ComplianceIntelligence:
         restricted = content_risk.get('restricted_keywords_found', [])
         for item in restricted:
             cat = item.get('category')
+            keyword = item.get('keyword', 'unknown')
             penalty = 0
+            penalty_adjustment_reason = ""
+            business_context_applied = ""
             
             # Context Logic for Crypto
             if cat == 'crypto':
                 if context_type in [BusinessContextClassifier.CONTEXT_BLOCKCHAIN, BusinessContextClassifier.CONTEXT_FINTECH]:
                     penalty = 0 # Neutral / Informational
-                    # Add info flag instead of penalty?
+                    penalty_adjustment_reason = f"Reduced due to {context_type} context (crypto content is expected)"
+                    business_context_applied = context_type
+                    # Add info flag instead of penalty
                     risk_flags.append({
                          "type": "contextual_info",
                          "severity": "info",
                          "message": f"Crypto content detected (Expected for {context_type})",
-                         "penalty": 0
+                         "penalty": 0,
+                         "penalty_adjustment_reason": penalty_adjustment_reason,
+                         "business_context_applied": business_context_applied,
+                         "signal_reference": "content_risk_detection",
+                         "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
+                         "triggering_keyword": keyword,
+                         "triggering_category": cat
                     })
                 else:
                     penalty = 5 # Standard penalty for others (e.g. Ecom)
-            elif cat == 'gambling': penalty = 15
-            elif cat == 'adult': penalty = 20
-            elif cat == 'pharmacy': penalty = 10
+                    penalty_adjustment_reason = "Standard penalty for crypto content in non-crypto context"
+                    business_context_applied = context_type or "UNKNOWN"
+            elif cat == 'gambling': 
+                penalty = 15
+                penalty_adjustment_reason = "Standard penalty for gambling content"
+                business_context_applied = context_type or "UNKNOWN"
+            elif cat == 'adult': 
+                penalty = 20
+                penalty_adjustment_reason = "Standard penalty for adult content"
+                business_context_applied = context_type or "UNKNOWN"
+            elif cat == 'pharmacy': 
+                penalty = 10
+                penalty_adjustment_reason = "Standard penalty for pharmacy content"
+                business_context_applied = context_type or "UNKNOWN"
             
             if penalty > 0:
                 trust_score -= penalty
+                # Per PRD V2.1.1: Content risk must never auto-fail compliance
+                # Severity must downgrade if context reduces relevance
                 risk_flags.append({
                     "type": "restricted_content",
                     "severity": "critical" if penalty >= 15 else "moderate",
-                    "message": f"Detected {cat} related specific keywords ({item.get('keyword')})",
-                    "penalty": penalty
+                    "message": f"Detected {cat} related specific keywords ({keyword})",
+                    "penalty": penalty,
+                    "penalty_adjustment_reason": penalty_adjustment_reason,  # Per PRD
+                    "business_context_applied": business_context_applied,  # Per PRD
+                    "signal_reference": "content_risk_detection",
+                    "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
+                    "triggering_keyword": keyword,
+                    "triggering_category": cat,
+                    # Per PRD: Include source URL and snippet from content_risk evidence
+                    "source_url": item.get('evidence', {}).get('source_url', 'unknown') if isinstance(item.get('evidence'), dict) else 'unknown',
+                    "evidence_snippet": item.get('evidence', {}).get('evidence_snippet', '') if isinstance(item.get('evidence'), dict) else ''
                 })
         
         if content_risk.get('dummy_words_detected'):
             trust_score -= 10
+            dummy_evidence = content_risk.get('dummy_words_evidence', [])
+            source_url = dummy_evidence[0].get('page_url', 'unknown') if dummy_evidence else 'unknown'
+            evidence_snippet = dummy_evidence[0].get('evidence_snippet', '') if dummy_evidence else ''
+            
             risk_flags.append({
                 "type": "quality_risk",
                 "severity": "moderate",
                 "message": "Lorem ipsum / dummy text detected",
-                "penalty": 10
+                "penalty": 10,
+                "penalty_adjustment_reason": "Standard penalty for placeholder/dummy content",
+                "business_context_applied": context_type or "UNKNOWN",
+                "signal_reference": "content_risk_detection",
+                "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
+                "triggering_rule": "Dummy text pattern matching",
+                "source_url": source_url,
+                "evidence_snippet": evidence_snippet
             })
             
         trust_score = max(0, min(30, trust_score))
@@ -212,14 +290,83 @@ class ComplianceIntelligence:
         elif total_score >= 50: rating = "Fair"
         else: rating = "Poor"
         
+        # Per PRD V2.1.1: Compliance score is Advisory, must be labeled as such
+        # Add static disclaimer and component breakdown with evidence
         return {
             "score": total_score,
+            "advisory_score": total_score,  # Explicit advisory label per PRD
             "rating": rating,
             "context": context_type,
+            "signal_type": SignalClassifier.classify_signal("compliance_score"),
+            "label": "Advisory Score",  # Per PRD: must display as "Advisory Score"
+            # Per PRD V2.1.1: Static disclaimer under score
+            "disclaimer": "Advisory score based on publicly visible signals. Requires human review.",
             "breakdown": {
-                "technical": {"score": tech_score, "max": 30, "details": tech_breakdown},
-                "policy": {"score": policy_score, "max": 40, "details": policy_breakdown},
-                "trust": {"score": trust_score, "max": 30, "details": risk_flags}
+                "technical": {
+                    "score": tech_score,
+                    "max": 30,
+                    "details": tech_breakdown,
+                    "label": "Technical Compliance",
+                    # Per PRD: Each component must expose signals contributing, points added/deducted, reason
+                    "components": [
+                        {
+                            "name": item.get("item", "Unknown"),
+                            "points": item.get("score", 0),
+                            "max_points": item.get("max", 0),
+                            "status": item.get("status", "unknown"),
+                            "reason": item.get("reason", item.get("notes", "")),
+                            "signal_reference": item.get("signal_reference", "unknown"),
+                            "signal_type": item.get("signal_type", "advisory")
+                        }
+                        for item in tech_breakdown
+                    ]
+                },
+                "policy": {
+                    "score": policy_score,
+                    "max": 40,
+                    "details": policy_breakdown,
+                    "label": "Policy Compliance",
+                    # Per PRD: Each component must expose signals contributing, points added/deducted, reason
+                    "components": [
+                        {
+                            "name": item.get("item", "Unknown"),
+                            "points": item.get("score", 0),
+                            "max_points": item.get("max", 0),
+                            "status": item.get("status", "unknown"),
+                            "expectation": item.get("expectation", "required"),  # Per PRD: Required/Optional/N/A
+                            "reason": item.get("notes", ""),
+                            "signal_reference": item.get("signal_reference", "unknown"),
+                            "signal_type": item.get("signal_type", "advisory"),
+                            "evidence": item.get("evidence")  # Include evidence if available
+                        }
+                        for item in policy_breakdown
+                    ]
+                },
+                "trust": {
+                    "score": trust_score,
+                    "max": 30,
+                    "details": risk_flags,
+                    "label": "Trust & Risk",
+                    # Per PRD: Each risk flag must show penalty adjustment reason
+                    "components": [
+                        {
+                            "name": flag.get("type", "unknown").replace("_", " ").title(),
+                            "severity": flag.get("severity", "info"),
+                            "penalty": flag.get("penalty", 0),
+                            "message": flag.get("message", ""),
+                            "penalty_adjustment_reason": flag.get("penalty_adjustment_reason", ""),  # Per PRD
+                            "business_context_applied": flag.get("business_context_applied", ""),  # Per PRD
+                            "signal_reference": flag.get("signal_reference", "unknown"),
+                            "signal_type": flag.get("signal_type", "advisory"),
+                            "triggering_keyword": flag.get("triggering_keyword"),
+                            "triggering_category": flag.get("triggering_category")
+                        }
+                        for flag in risk_flags
+                    ]
+                }
             },
-            "risk_flags": risk_flags
+            "risk_flags": risk_flags,
+            # Per PRD: Score breakdown must be visible, each penalty references specific signal
+            "breakdown_visible": True,
+            "penalties_referenced": True
         }

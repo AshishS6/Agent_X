@@ -23,12 +23,14 @@ const MarketResearchAgent = () => {
     // Report View State
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState('compliance');
+    const [activeTab, setActiveTab] = useState('crawl');
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
     const handleViewReport = (task: Task) => {
         setSelectedTask(task);
+        // Ensure the report opens on the first tab (Crawl summary)
+        setActiveTab('crawl');
         setIsReportModalOpen(true);
     };
 
@@ -278,7 +280,7 @@ const MarketResearchAgent = () => {
                                 </div>
                                 <div className="flex-1">
                                     <p className="text-sm font-medium text-white">{task.input.topic || 'Research Report'}</p>
-                                    <p className="text-xs text-gray-500">{new Date(task.createdAt).toLocaleDateString()}</p>
+                                    <p className="text-xs text-gray-500">{new Date(task.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
                                 </div>
                                 <button
                                     onClick={() => handleViewReport(task)}
@@ -326,7 +328,7 @@ const MarketResearchAgent = () => {
                                         {getStatusIcon(task.status)}
                                         <span className="capitalize">{task.status}</span>
                                     </td>
-                                    <td className="py-3 text-gray-500">{new Date(task.createdAt).toLocaleDateString()}</td>
+                                    <td className="py-3 text-gray-500">{new Date(task.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</td>
                                     <td className="py-3">
                                         {task.status === 'completed' && (
                                             <button
@@ -532,7 +534,7 @@ const MarketResearchAgent = () => {
                                         {selectedTask.action.replace('_', ' ')}
                                     </span>
                                     <span>•</span>
-                                    <span>{new Date(selectedTask.createdAt).toLocaleString()}</span>
+                                    <span>{new Date(selectedTask.createdAt).toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}</span>
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
@@ -594,6 +596,19 @@ const MarketResearchAgent = () => {
                                 // Normalize data if needed
                                 const siteScan = crawlData.comprehensive_site_scan;
                                 const displayData = siteScan || crawlData;
+                                
+                                // Extract crawl summary per PRD V2.1.1
+                                const crawlSummary = siteScan?.crawl_summary || {};
+                                
+                                // RDAP from backend with fallback to compliance intelligence
+                                const rdap = siteScan?.rdap || {};
+                                const techDetails = siteScan?.compliance_intelligence?.breakdown?.technical?.details || [];
+                                const domainAgeDetail = Array.isArray(techDetails) ? techDetails.find((d: any) => d.item === 'Domain Age') : null;
+                                const lowVintageAlert = siteScan?.compliance?.general?.alerts?.find((a: any) => a.code === 'LOW_VINTAGE');
+                                const domainAgeDays = typeof rdap.age_days === 'number' ? rdap.age_days : (() => {
+                                    const m = lowVintageAlert?.description?.match(/(\\d+)\\s+days/i);
+                                    return m ? parseInt(m[1], 10) : undefined;
+                                })();
 
                                 // Render Tabbed Interface for Crawler Results
                                 return (
@@ -601,22 +616,23 @@ const MarketResearchAgent = () => {
                                         {/* Tabs */}
                                         <div className="flex border-b border-gray-800 px-6">
                                             {[
-                                                { id: 'compliance', label: 'Compliance checks', icon: Shield },
-                                                { id: 'policy', label: 'Policy details', icon: FileText },
-                                                { id: 'mcc', label: 'MCC codes', icon: CreditCard },
-                                                { id: 'product', label: 'Product details', icon: ShoppingBag },
-                                                { id: 'business', label: 'Business details', icon: Building },
-                                                { id: 'changes', label: 'Changes', icon: Activity },
+                                                { id: 'crawl', label: 'Crawl summary' },
+                                                { id: 'compliance', label: 'Compliance checks' },
+                                                { id: 'policy', label: 'Policy details' },
+                                                { id: 'mcc', label: 'MCC codes' },
+                                                { id: 'product', label: 'Product details' },
+                                                { id: 'business', label: 'Business details' },
+                                                { id: 'content-risk', label: 'Content Risk' },
+                                                { id: 'changes', label: 'Changes' },
                                             ].map((tab) => (
                                                 <button
                                                     key={tab.id}
                                                     onClick={() => setActiveTab(tab.id)}
-                                                    className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === tab.id
+                                                    className={`px-6 py-4 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id
                                                         ? 'border-blue-500 text-blue-400'
                                                         : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-700'
                                                         }`}
                                                 >
-                                                    <tab.icon size={16} />
                                                     {tab.label}
                                                 </button>
                                             ))}
@@ -624,6 +640,243 @@ const MarketResearchAgent = () => {
 
                                         {/* Tab Content */}
                                         <div className="flex-1 overflow-y-auto p-6 bg-gray-900/50">
+                                            {activeTab === 'crawl' && (
+                                                <div className="space-y-6">
+                                                    {/* Crawl Summary Tab */}
+                                                    <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-6">
+                                                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                                            <Activity size={20} />
+                                                            Crawl Summary
+                                                        </h3>
+                                                        {/* Stats */}
+                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                            <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-700">
+                                                                <div className="text-xs text-gray-400 mb-1">Pages Discovered</div>
+                                                                <div className="text-2xl font-bold text-white">{crawlSummary.pages_discovered ?? 0}</div>
+                                                            </div>
+                                                            <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-700">
+                                                                <div className="text-xs text-gray-400 mb-1">Pages Fetched</div>
+                                                                <div className="text-2xl font-bold text-green-400">{crawlSummary.pages_fetched ?? 0}</div>
+                                                            </div>
+                                                            <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-700">
+                                                                <div className="text-xs text-gray-400 mb-1">Pages Skipped</div>
+                                                                <div className="text-2xl font-bold text-yellow-400">{crawlSummary.pages_skipped ?? 0}</div>
+                                                            </div>
+                                                            <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-700">
+                                                                <div className="text-xs text-gray-400 mb-1">Crawl Time</div>
+                                                                <div className="text-lg font-bold text-white">
+                                                                    {crawlSummary.crawl_time_ms ? `${(crawlSummary.crawl_time_ms / 1000).toFixed(1)}s` : 'N/A'}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Early Exit */}
+                                                        {(crawlSummary.early_exit || crawlSummary.early_exit_reason) && (
+                                                            <div className="mt-4 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                                                                <div className="flex items-center gap-2 text-blue-400 font-medium mb-2">
+                                                                    <Info size={16} />
+                                                                    Early Exit
+                                                                </div>
+                                                                <div className="text-sm text-gray-300">
+                                                                    {crawlSummary.early_exit_reason || 'Crawl completed early'}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Robots / Sitemap */}
+                                                        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-gray-400">Robots.txt Checked:</span>
+                                                                <span className={crawlSummary.robots_checked ? 'text-green-400' : 'text-gray-500'}>
+                                                                    {crawlSummary.robots_checked ? 'Yes' : 'No'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-gray-400">Sitemap Found:</span>
+                                                                <span className={crawlSummary.sitemap_found ? 'text-green-400' : 'text-gray-500'}>
+                                                                    {crawlSummary.sitemap_found ? 'Yes' : 'No'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-gray-400">Sitemap URLs:</span>
+                                                                <span className="text-gray-300">{crawlSummary.sitemap_urls_count ?? 0}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Found Key Pages (from Policy Details) */}
+                                                    {siteScan?.policy_details && (
+                                                        <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-6">
+                                                            <h3 className="text-lg font-bold text-white mb-4">Discovered Key Pages</h3>
+                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                                {Object.entries(siteScan.policy_details).map(([key, val]: any, idx) => {
+                                                                    // Check if this is an e-commerce site
+                                                                    const productPage = siteScan.policy_details?.product;
+                                                                    const isEcommerce = productPage?.found && 
+                                                                        (productPage.url?.includes('/shop') || 
+                                                                         productPage.url?.includes('/store') ||
+                                                                         productPage.url?.includes('/cart') ||
+                                                                         productPage.url?.includes('/checkout'));
+                                                                    
+                                                                    // For shipping_delivery on non-e-commerce sites, show as N/A
+                                                                    const isShippingOrReturns = key === 'shipping_delivery' || key === 'returns_refund';
+                                                                    const showAsNotApplicable = isShippingOrReturns && !val?.found && !isEcommerce;
+                                                                    
+                                                                    return (
+                                                                        <div key={idx} className="bg-gray-900/40 rounded-lg p-3 border border-gray-800">
+                                                                            <div className="flex items-center justify-between">
+                                                                                <span className="text-sm text-gray-300 capitalize">{key.replace(/_/g, ' ')}</span>
+                                                                                {val?.found ? (
+                                                                                    <CheckCircle size={16} className="text-green-400" />
+                                                                                ) : showAsNotApplicable ? (
+                                                                                    <Info size={16} className="text-gray-500" />
+                                                                                ) : (
+                                                                                    <XCircle size={16} className="text-gray-600" />
+                                                                                )}
+                                                                            </div>
+                                                                            {val?.found && val?.url && (
+                                                                                <a href={val.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline break-all">
+                                                                                    {val.url}
+                                                                                </a>
+                                                                            )}
+                                                                            {showAsNotApplicable && (
+                                                                                <span className="text-xs text-gray-500">N/A for service business</span>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Failed Scan Notice (if scan failed) */}
+                                                    {siteScan?.scan_status?.status === 'FAILED' && (
+                                                        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-6">
+                                                            <div className="flex items-start gap-4">
+                                                                <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center border border-red-500/20 flex-shrink-0">
+                                                                    <Lock className="text-red-400" size={24} />
+                                                                </div>
+                                                                <div className="flex-1">
+                                                                    <h3 className="text-lg font-bold text-red-400 mb-1">Scan Failed</h3>
+                                                                    <p className="text-gray-300 mb-2">
+                                                                        {siteScan.scan_status.message || "The website blocked access or could not be reached."}
+                                                                    </p>
+                                                                    <div className="flex items-center gap-4 text-sm">
+                                                                        <span className="bg-red-500/20 text-red-300 px-2 py-0.5 rounded text-xs font-mono">
+                                                                            {siteScan.scan_status.reason}
+                                                                        </span>
+                                                                        {siteScan.scan_status.retryable && (
+                                                                            <span className="text-yellow-400 text-xs">Retryable</span>
+                                                                        )}
+                                                                    </div>
+                                                                    {siteScan.scan_status.target_url && (
+                                                                        <a
+                                                                            href={siteScan.scan_status.target_url}
+                                                                            target="_blank"
+                                                                            rel="noreferrer"
+                                                                            className="inline-flex items-center gap-2 mt-3 text-blue-400 hover:underline text-sm"
+                                                                        >
+                                                                            <ExternalLink size={14} />
+                                                                            Visit Website Manually
+                                                                        </a>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Domain Registration (RDAP) - shown here for all scans including failed ones */}
+                                                    {(siteScan?.rdap || rdap) && (
+                                                        <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-6">
+                                                            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                                                <Globe size={20} className="text-blue-400" />
+                                                                Domain Registration (RDAP)
+                                                            </h3>
+                                                            <div className="text-sm text-gray-300 space-y-3">
+                                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                                    <div className="bg-gray-900/50 rounded-lg p-3">
+                                                                        <div className="text-gray-400 text-xs mb-1">Status</div>
+                                                                        <div className={
+                                                                            domainAgeDetail?.status?.startsWith('Good') ? 'text-green-400 font-semibold' :
+                                                                            domainAgeDetail?.status?.startsWith('Moderate') ? 'text-yellow-400 font-semibold' :
+                                                                            domainAgeDetail?.status?.startsWith('Low') ? 'text-yellow-400 font-semibold' :
+                                                                            domainAgeDetail?.status?.startsWith('Critical') ? 'text-red-400 font-semibold' :
+                                                                            'text-gray-400'
+                                                                        }>
+                                                                            {domainAgeDetail?.status || (typeof domainAgeDays === 'number' ? (domainAgeDays > (3*365) ? 'Good (> 3yr)' : domainAgeDays > 365 ? 'Moderate (1-3yr)' : 'Low (< 1yr)') : 'Unknown')}
+                                                                        </div>
+                                                                    </div>
+                                                                    {typeof domainAgeDays === 'number' && (
+                                                                        <div className="bg-gray-900/50 rounded-lg p-3">
+                                                                            <div className="text-gray-400 text-xs mb-1">Age</div>
+                                                                            <div className="text-white font-semibold">{domainAgeDays} days</div>
+                                                                        </div>
+                                                                    )}
+                                                                    {((siteScan?.rdap || rdap)?.registrar?.name || (siteScan?.rdap || rdap)?.registrar?.iana_id) && (
+                                                                        <div className="bg-gray-900/50 rounded-lg p-3">
+                                                                            <div className="text-gray-400 text-xs mb-1">Registrar</div>
+                                                                            <div className="text-white truncate">{(siteScan?.rdap || rdap)?.registrar?.name || 'Unknown'}</div>
+                                                                        </div>
+                                                                    )}
+                                                                    {(siteScan?.rdap || rdap)?.registrar?.iana_id && (
+                                                                        <div className="bg-gray-900/50 rounded-lg p-3">
+                                                                            <div className="text-gray-400 text-xs mb-1">IANA ID</div>
+                                                                            <div className="text-white">{(siteScan?.rdap || rdap)?.registrar?.iana_id}</div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                
+                                                                {/* Dates Row */}
+                                                                {((siteScan?.rdap || rdap)?.created_on || (siteScan?.rdap || rdap)?.updated_on || (siteScan?.rdap || rdap)?.expires_on) && (
+                                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-gray-700/50">
+                                                                        <div><span className="text-gray-400">Created:</span> <span className="text-white">{(siteScan?.rdap || rdap)?.created_on || 'N/A'}</span></div>
+                                                                        <div><span className="text-gray-400">Updated:</span> <span className="text-white">{(siteScan?.rdap || rdap)?.updated_on || 'N/A'}</span></div>
+                                                                        <div><span className="text-gray-400">Expires:</span> <span className="text-white">{(siteScan?.rdap || rdap)?.expires_on || 'N/A'}</span></div>
+                                                                    </div>
+                                                                )}
+                                                                
+                                                                {/* Status codes */}
+                                                                {Array.isArray((siteScan?.rdap || rdap)?.status) && (siteScan?.rdap || rdap)?.status.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-700/50">
+                                                                        {(siteScan?.rdap || rdap)?.status.slice(0, 8).map((st: string, i: number) => (
+                                                                            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded border bg-gray-700/40 text-gray-300 border-gray-600">
+                                                                                {st}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                                
+                                                                {/* Nameservers */}
+                                                                {Array.isArray((siteScan?.rdap || rdap)?.nameservers) && (siteScan?.rdap || rdap)?.nameservers.length > 0 && (
+                                                                    <div className="text-xs text-gray-400 pt-2 border-t border-gray-700/50">
+                                                                        <span className="mr-2">Nameservers:</span>
+                                                                        <span className="text-gray-300">{(siteScan?.rdap || rdap)?.nameservers.slice(0, 5).join(', ')}{(siteScan?.rdap || rdap)?.nameservers.length > 5 ? '…' : ''}</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Crawl Errors - only show for partial failures (not when whole scan failed) */}
+                                                    {crawlSummary?.errors && crawlSummary.errors.length > 0 && siteScan?.scan_status?.status !== 'FAILED' && (
+                                                        <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-6">
+                                                            <h3 className="text-lg font-bold text-white mb-4">Crawl Errors</h3>
+                                                            <div className="space-y-3">
+                                                                {crawlSummary.errors.slice(0, 8).map((err: any, i: number) => (
+                                                                    <div key={i} className="bg-black/30 rounded border border-red-500/20 p-3 text-sm">
+                                                                        <div className="flex items-center justify-between mb-1">
+                                                                            <span className="text-red-300 font-medium uppercase">{err.type}</span>
+                                                                            {err.status_code && <span className="text-gray-400">HTTP {err.status_code}</span>}
+                                                                        </div>
+                                                                        <div className="text-gray-300 break-all">{err.url}</div>
+                                                                        {err.message && <div className="text-gray-500 mt-1">{err.message}</div>}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                             {activeTab === 'compliance' && (
                                                 <div className="space-y-6">
                                                     {/* NEW: Comprehensive Site Scan View */}
@@ -672,11 +925,7 @@ const MarketResearchAgent = () => {
                                                                 <div className="space-y-6 animate-in fade-in slide-in-from-top-2">
                                                                     {/* Score Card */}
                                                                     <div className="bg-gray-800/80 border border-gray-700 rounded-lg p-6 relative overflow-hidden">
-                                                                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                                                                            <Shield size={120} className="text-white" />
-                                                                        </div>
-
-                                                                        <div className="flex flex-col md:flex-row gap-8 relative z-10">
+                                                                        <div className="flex flex-col md:flex-row gap-8">
                                                                             {/* Main Score */}
                                                                             <div className="flex flex-col items-center justify-center min-w-[200px]">
                                                                                 <div className="relative w-32 h-32 flex items-center justify-center">
@@ -707,7 +956,10 @@ const MarketResearchAgent = () => {
                                                                                     </div>
                                                                                 </div>
                                                                                 <p className="text-xs text-gray-500 mt-2 text-center max-w-[150px] mb-2">
-                                                                                    Compliance Score
+                                                                                    {siteScan.compliance_intelligence?.label || 'Advisory Score'}
+                                                                                    {siteScan.compliance_intelligence?.signal_type === 'advisory' && (
+                                                                                        <span className="block text-[10px] text-yellow-400 mt-0.5">(Advisory)</span>
+                                                                                    )}
                                                                                 </p>
                                                                                 {siteScan.business_context ? (
                                                                                     <div className="flex flex-col gap-2 items-center w-full">
@@ -818,9 +1070,19 @@ const MarketResearchAgent = () => {
                                                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                                                 {siteScan.compliance_intelligence.risk_flags.map((flag: any, idx: number) => (
                                                                                     <div key={idx} className="bg-black/30 border border-red-500/30 rounded p-3 flex justify-between items-start">
-                                                                                        <div>
+                                                                                        <div className="flex-1">
                                                                                             <span className="text-xs font-bold text-red-300 uppercase tracking-wider block mb-1">{flag.type.replace('_', ' ')}</span>
                                                                                             <p className="text-sm text-gray-300">{flag.message}</p>
+                                                                                            {flag.signal_reference && (
+                                                                                                <div className="mt-2 text-xs text-gray-500">
+                                                                                                    Signal: {flag.signal_reference} ({flag.signal_type || 'advisory'})
+                                                                                                </div>
+                                                                                            )}
+                                                                                            {flag.triggering_keyword && (
+                                                                                                <div className="mt-1 text-xs text-gray-500">
+                                                                                                    Keyword: {flag.triggering_keyword}
+                                                                                                </div>
+                                                                                            )}
                                                                                         </div>
                                                                                         <span className="text-xs font-bold bg-red-500/20 text-red-400 px-2 py-1 rounded">
                                                                                             -{flag.penalty} pts
@@ -830,8 +1092,62 @@ const MarketResearchAgent = () => {
                                                                             </div>
                                                                         </div>
                                                                     )}
+                                                                    
+                                                                    {/* Domain Age Summary (full RDAP details in Summary tab) */}
+                                                                    {lowVintageAlert && (
+                                                                        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mt-4">
+                                                                            <div className="flex items-center gap-2 text-yellow-400 mb-2">
+                                                                                <AlertTriangle size={18} />
+                                                                                <span className="font-semibold">Low Domain Vintage</span>
+                                                                            </div>
+                                                                            <div className="text-sm text-yellow-200">{lowVintageAlert.description}</div>
+                                                                            <div className="text-xs text-gray-400 mt-2">
+                                                                                See Crawl Summary tab for full RDAP details
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+
+                                                                    {/* Content Risk Section - PRD V2.1.1 */}
+                                                                    {siteScan.content_risk && (
+                                                                        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-5 mt-4">
+                                                                            <h3 className="text-yellow-400 font-bold flex items-center gap-2 mb-3">
+                                                                                <AlertTriangle size={20} />
+                                                                                Content Risk Detection
+                                                                                <span className="text-xs text-yellow-300 ml-2">(Rule-based, non-semantic)</span>
+                                                                            </h3>
+                                                                            {siteScan.content_risk.detection_method && (
+                                                                                <p className="text-xs text-gray-400 mb-3">{siteScan.content_risk.detection_method}</p>
+                                                                            )}
+                                                                            {siteScan.content_risk.restricted_keywords_found && siteScan.content_risk.restricted_keywords_found.length > 0 && (
+                                                                                <div className="space-y-2">
+                                                                                    {siteScan.content_risk.restricted_keywords_found.map((risk: any, idx: number) => (
+                                                                                        <div key={idx} className="bg-black/30 border border-yellow-500/30 rounded p-3">
+                                                                                            <div className="flex justify-between items-start mb-2">
+                                                                                                <span className="text-xs font-bold text-yellow-300 uppercase">{risk.category}</span>
+                                                                                                <span className="text-xs text-gray-400">{risk.evidence?.severity || 'moderate'}</span>
+                                                                                            </div>
+                                                                                            <p className="text-sm text-gray-300 mb-2">Keyword: {risk.keyword}</p>
+                                                                                            {risk.evidence && (
+                                                                                                <div className="text-xs text-gray-500 space-y-1">
+                                                                                                    <div>Source: <a href={risk.evidence.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{risk.evidence.source_url}</a></div>
+                                                                                                    <div>Snippet: {risk.evidence.evidence_snippet}</div>
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+                                                                            {siteScan.content_risk.dummy_words_detected && (
+                                                                                <div className="mt-3 bg-black/30 border border-yellow-500/30 rounded p-3">
+                                                                                    <span className="text-xs font-bold text-yellow-300 uppercase block mb-1">Dummy Text Detected</span>
+                                                                                    <p className="text-sm text-gray-300">Lorem ipsum or placeholder text found</p>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             )}
+                                                            
                                                             {/* General Compliance Status */}
                                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                                 {/* General */}
@@ -887,11 +1203,7 @@ const MarketResearchAgent = () => {
                                                                                 </li>
                                                                                 <li className="flex items-center gap-2">
                                                                                     <CheckCircle size={14} className="text-green-400" />
-                                                                                    <span>SSL Certificate is valid (HTTPS)</span>
-                                                                                </li>
-                                                                                <li className="flex items-center gap-2">
-                                                                                    <CheckCircle size={14} className="text-green-400" />
-                                                                                    <span>Domain vintage meets requirements</span>
+                                                                                    <span>SSL Certificate detected (HTTPS)</span>
                                                                                 </li>
                                                                             </ul>
                                                                         </div>
@@ -1016,7 +1328,7 @@ const MarketResearchAgent = () => {
                                                                         <div className="flex justify-between py-2 border-b border-gray-700">
                                                                             <span className="text-gray-400">Status</span>
                                                                             <span className={crawlData.compliance_checks?.ssl_certificate?.valid ? "text-green-400" : "text-red-400"}>
-                                                                                {crawlData.compliance_checks?.ssl_certificate?.valid ? "Valid" : "Invalid"}
+                                                                                {crawlData.compliance_checks?.ssl_certificate?.valid ? "Detected" : "Not Detected"}
                                                                             </span>
                                                                         </div>
                                                                         <div className="flex justify-between py-2 border-b border-gray-700">
@@ -1034,31 +1346,60 @@ const MarketResearchAgent = () => {
                                             {activeTab === 'policy' && (
                                                 <div className="space-y-6">
                                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                        {Object.entries(displayData.policy_details || {}).map(([key, value]: [string, any]) => (
-                                                            <div key={key} className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 flex flex-col justify-between">
-                                                                <div>
-                                                                    <div className="flex items-center gap-2 mb-2">
-                                                                        {value.found
-                                                                            ? <CheckCircle className="text-green-500" size={18} />
-                                                                            : <XCircle className="text-gray-500" size={18} />
-                                                                        }
-                                                                        <h4 className="font-medium text-white capitalize">{key.replace(/_/g, ' ')}</h4>
+                                                        {Object.entries(displayData.policy_details || {}).map(([key, value]: [string, any]) => {
+                                                            // Check if this is an e-commerce site (has shop/store in product URL)
+                                                            const productPage = displayData.policy_details?.product;
+                                                            const isEcommerce = productPage?.found && 
+                                                                (productPage.url?.includes('/shop') || 
+                                                                 productPage.url?.includes('/store') ||
+                                                                 productPage.url?.includes('/cart') ||
+                                                                 productPage.url?.includes('/checkout'));
+                                                            
+                                                            // For shipping_delivery and returns_refund on non-e-commerce sites, show as N/A
+                                                            const isShippingOrReturns = key === 'shipping_delivery' || key === 'returns_refund';
+                                                            const showAsNotApplicable = isShippingOrReturns && !value.found && !isEcommerce;
+                                                            
+                                                            return (
+                                                                <div key={key} className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 flex flex-col justify-between">
+                                                                    <div>
+                                                                        <div className="flex items-center gap-2 mb-2">
+                                                                            {value.found
+                                                                                ? <CheckCircle className="text-green-500" size={18} />
+                                                                                : showAsNotApplicable
+                                                                                    ? <Info className="text-gray-400" size={18} />
+                                                                                    : <XCircle className="text-gray-500" size={18} />
+                                                                            }
+                                                                            <h4 className="font-medium text-white capitalize">{key.replace(/_/g, ' ')}</h4>
+                                                                        </div>
+                                                                        <p className="text-xs text-gray-400 mb-3">
+                                                                            {showAsNotApplicable 
+                                                                                ? 'N/A (not applicable for service business)'
+                                                                                : value.status || (value.found ? 'Detected' : 'Not detected')
+                                                                            }
+                                                                        </p>
+                                                                        {value.evidence && (
+                                                                            <div className="mt-2 text-[10px] text-gray-500">
+                                                                                <span className="text-gray-600">Source: </span>
+                                                                                <a href={value.evidence.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                                                                                    {value.evidence.source_url}
+                                                                                </a>
+                                                                            </div>
+                                                                        )}
                                                                     </div>
-                                                                    <p className="text-xs text-gray-400 mb-3">{value.status || 'Not found'}</p>
+                                                                    {value.found && value.url && (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                setPreviewUrl(value.url);
+                                                                                setIsPreviewOpen(true);
+                                                                            }}
+                                                                            className="text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 py-1.5 px-3 rounded border border-blue-500/30 flex items-center justify-center gap-1 transition-colors"
+                                                                        >
+                                                                            <Eye size={12} /> Preview
+                                                                        </button>
+                                                                    )}
                                                                 </div>
-                                                                {value.found && value.url && (
-                                                                    <button
-                                                                        onClick={() => {
-                                                                            setPreviewUrl(value.url);
-                                                                            setIsPreviewOpen(true);
-                                                                        }}
-                                                                        className="text-xs bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 py-1.5 px-3 rounded border border-blue-500/30 flex items-center justify-center gap-1 transition-colors"
-                                                                    >
-                                                                        <Eye size={12} /> Preview
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             )}
@@ -1086,7 +1427,7 @@ const MarketResearchAgent = () => {
                                                                                 {displayData.mcc_codes.primary_mcc.category} / {displayData.mcc_codes.primary_mcc.subcategory}
                                                                             </div>
                                                                             <div className="mt-3 bg-gray-900/50 rounded p-3 text-sm border border-gray-700">
-                                                                                <span className="text-gray-500 block mb-1 text-xs uppercase">Reasoning</span>
+                                                                                <span className="text-gray-500 block mb-1 text-xs uppercase">Evidence</span>
                                                                                 {displayData.mcc_codes.primary_mcc.keywords_matched && Array.isArray(displayData.mcc_codes.primary_mcc.keywords_matched) ? (
                                                                                     <div className="flex flex-wrap gap-2">
                                                                                         {displayData.mcc_codes.primary_mcc.keywords_matched.map((kw: string, i: number) => (
@@ -1095,6 +1436,16 @@ const MarketResearchAgent = () => {
                                                                                     </div>
                                                                                 ) : (
                                                                                     <span className="text-gray-400">High keyword match frequency on homepage.</span>
+                                                                                )}
+                                                                                {displayData.mcc_codes.primary_mcc.evidence && (
+                                                                                    <div className="mt-2 text-[10px] text-gray-500">
+                                                                                        <div>Pages: {displayData.mcc_codes.primary_mcc.evidence.additional_context?.pages_matched?.join(', ') || 'Unknown'}</div>
+                                                                                    </div>
+                                                                                )}
+                                                                                {displayData.mcc_codes.primary_mcc.low_confidence && (
+                                                                                    <div className="mt-2 text-xs text-yellow-400">
+                                                                                        Low confidence classification (below 30% threshold)
+                                                                                    </div>
                                                                                 )}
                                                                             </div>
                                                                         </div>
@@ -1416,6 +1767,201 @@ const MarketResearchAgent = () => {
                                                             <TechStackCard techStack={displayData.tech_stack} />
                                                             <SEOHealthCard seoAnalysis={displayData.seo_analysis} />
                                                             <BusinessMetadataV2 businessDetails={displayData.business_details} />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {activeTab === 'content-risk' && (
+                                                <div className="space-y-6">
+                                                    {/* Content Risk Analysis */}
+                                                    {siteScan?.content_risk ? (
+                                                        <div className="space-y-6">
+                                                            {/* Risk Score Summary */}
+                                                            <div className={`p-6 rounded-lg border ${
+                                                                siteScan.content_risk.risk_score >= 100 
+                                                                    ? 'bg-red-500/10 border-red-500/30' 
+                                                                    : siteScan.content_risk.risk_score >= 50 
+                                                                    ? 'bg-yellow-500/10 border-yellow-500/30' 
+                                                                    : 'bg-green-500/10 border-green-500/30'
+                                                            }`}>
+                                                                <div className="flex items-center justify-between mb-4">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <AlertOctagon className={
+                                                                            siteScan.content_risk.risk_score >= 100 
+                                                                                ? 'text-red-400' 
+                                                                                : siteScan.content_risk.risk_score >= 50 
+                                                                                ? 'text-yellow-400' 
+                                                                                : 'text-green-400'
+                                                                        } size={24} />
+                                                                        <h3 className="text-lg font-bold text-white">Content Risk Score</h3>
+                                                                    </div>
+                                                                    <div className="text-right">
+                                                                        <div className={`text-3xl font-bold ${
+                                                                            siteScan.content_risk.risk_score >= 100 
+                                                                                ? 'text-red-400' 
+                                                                                : siteScan.content_risk.risk_score >= 50 
+                                                                                ? 'text-yellow-400' 
+                                                                                : 'text-green-400'
+                                                                        }`}>
+                                                                            {siteScan.content_risk.risk_score}
+                                                                        </div>
+                                                                        <div className="text-sm text-gray-400 mt-1">
+                                                                            {siteScan.content_risk.restricted_keywords_found?.length || 0} keywords detected
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-sm text-gray-300">
+                                                                    {siteScan.content_risk.risk_score >= 100 
+                                                                        ? 'High risk content detected. Multiple prohibited keywords found.' 
+                                                                        : siteScan.content_risk.risk_score >= 50 
+                                                                        ? 'Moderate risk content detected. Some restricted keywords found.' 
+                                                                        : 'Low risk. Minimal or no restricted content detected.'}
+                                                                </div>
+                                                            </div>
+
+                                                            {/* Dummy Words Detection */}
+                                                            {siteScan.content_risk.dummy_words_detected && (
+                                                                <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-5">
+                                                                    <div className="flex items-center gap-2 mb-3">
+                                                                        <AlertTriangle className="text-orange-400" size={20} />
+                                                                        <h3 className="text-lg font-bold text-orange-400">Dummy Content Detected</h3>
+                                                                    </div>
+                                                                    <p className="text-sm text-gray-300 mb-3">
+                                                                        Lorem ipsum or placeholder text was found on the website, indicating incomplete content.
+                                                                    </p>
+                                                                    {siteScan.content_risk.dummy_words && siteScan.content_risk.dummy_words.length > 0 && (
+                                                                        <div className="flex flex-wrap gap-2">
+                                                                            {siteScan.content_risk.dummy_words.map((pattern: string, idx: number) => (
+                                                                                <span key={idx} className="px-3 py-1 bg-orange-500/20 text-orange-300 text-xs font-mono rounded border border-orange-500/30">
+                                                                                    {pattern}
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Restricted Keywords by Category */}
+                                                            {siteScan.content_risk.restricted_keywords_found && siteScan.content_risk.restricted_keywords_found.length > 0 ? (
+                                                                <div>
+                                                                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                                                        <AlertOctagon className="text-red-400" size={20} />
+                                                                        Detected Restricted Keywords
+                                                                    </h3>
+                                                                    <div className="space-y-4">
+                                                                        {(() => {
+                                                                            // Group keywords by category
+                                                                            const grouped: { [key: string]: string[] } = {};
+                                                                            siteScan.content_risk.restricted_keywords_found.forEach((item: any) => {
+                                                                                if (!grouped[item.category]) {
+                                                                                    grouped[item.category] = [];
+                                                                                }
+                                                                                if (!grouped[item.category].includes(item.keyword)) {
+                                                                                    grouped[item.category].push(item.keyword);
+                                                                                }
+                                                                            });
+
+                                                                            // Category severity mapping
+                                                                            const categorySeverity: { [key: string]: { color: string; bg: string; border: string; label: string } } = {
+                                                                                'child_pornography': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Child Pornography' },
+                                                                                'adult': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Adult Content' },
+                                                                                'gambling': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Gambling' },
+                                                                                'weapons': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Weapons' },
+                                                                                'drugs': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Illegal Drugs' },
+                                                                                'pharmacy': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Prescription Drugs' },
+                                                                                'crypto': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Cryptocurrency' },
+                                                                                'forex': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Forex Trading' },
+                                                                                'binary': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Binary Options' },
+                                                                                'alcohol': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Alcohol' },
+                                                                                'tobacco': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Tobacco' },
+                                                                                'counterfeit': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Counterfeit Goods' },
+                                                                                'copyright': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Copyright Infringement' },
+                                                                                'hacking': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Hacking Tools' },
+                                                                                'government_ids': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Fake Government IDs' },
+                                                                                'body_parts': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Body Parts' },
+                                                                                'endangered_species': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Endangered Species' },
+                                                                                'pyrotechnics': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Pyrotechnics' },
+                                                                                'regulated_goods': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Regulated Goods' },
+                                                                                'securities': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Securities' },
+                                                                                'traffic_devices': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Traffic Devices' },
+                                                                                'wholesale_currency': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Wholesale Currency' },
+                                                                                'live_animals': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Live Animals' },
+                                                                                'mlm': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Multi-Level Marketing' },
+                                                                                'work_at_home': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Work at Home Schemes' },
+                                                                                'drop_shipped': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Drop-Shipped Merchandise' },
+                                                                                'money_transfer': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Money Transfer' },
+                                                                                'dating_escort': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Dating/Escort Services' },
+                                                                                'massage_parlors': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Massage Parlors' },
+                                                                                'detective_agencies': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Detective Agencies' },
+                                                                                'political': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Political Organizations' },
+                                                                                'bpo_kpo': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'BPO/KPO Services' },
+                                                                                'job_services': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Job Services' },
+                                                                                'real_estate': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Real Estate' },
+                                                                                'web_telephony': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Web Telephony' },
+                                                                                'auction': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Auction Services' },
+                                                                                'money_changer': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Money Changer' },
+                                                                                'offshore': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Offshore Corporation' },
+                                                                                'crowdsourcing': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Crowdsourcing' },
+                                                                                'antiques_art': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Antiques/Art' },
+                                                                                'gems_jewellery': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Gems/Jewellery' },
+                                                                                'embassies': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Embassies' },
+                                                                                'business_correspondent': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Business Correspondent' },
+                                                                                'digital_lending': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Digital Lending' },
+                                                                                'gift_cards_forex': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Gift Cards (Forex)' },
+                                                                                'video_chatting': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Video Chatting' },
+                                                                                'spam': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Spam/Bulk Marketing' },
+                                                                                'miracle_cures': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Miracle Cures' },
+                                                                                'offensive_goods': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Offensive Goods' },
+                                                                                'illegal_goods': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Illegal Goods' },
+                                                                            };
+
+                                                                            return Object.entries(grouped).map(([category, keywords]) => {
+                                                                                const severity = categorySeverity[category] || { 
+                                                                                    color: 'text-gray-400', 
+                                                                                    bg: 'bg-gray-500/10', 
+                                                                                    border: 'border-gray-500/30', 
+                                                                                    label: category.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                                                                                };
+                                                                                return (
+                                                                                    <div key={category} className={`${severity.bg} ${severity.border} border rounded-lg p-5`}>
+                                                                                        <div className="flex items-center justify-between mb-3">
+                                                                                            <h4 className={`font-bold ${severity.color} flex items-center gap-2`}>
+                                                                                                <AlertOctagon size={18} />
+                                                                                                {severity.label}
+                                                                                            </h4>
+                                                                                            <span className="text-xs text-gray-400 bg-black/30 px-2 py-1 rounded">
+                                                                                                {keywords.length} {keywords.length === 1 ? 'keyword' : 'keywords'}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                        <div className="flex flex-wrap gap-2">
+                                                                                            {keywords.map((keyword, idx) => (
+                                                                                                <span key={idx} className="px-3 py-1.5 bg-black/30 text-gray-300 text-sm rounded border border-gray-700/50 font-mono">
+                                                                                                    {keyword}
+                                                                                                </span>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                );
+                                                                            });
+                                                                        })()}
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="text-center p-12 bg-gray-800/30 rounded-lg border border-gray-700/50 border-dashed">
+                                                                    <CheckCircle className="mx-auto text-green-500 mb-3" size={32} />
+                                                                    <h3 className="text-lg font-medium text-white mb-2">No Restricted Keywords Detected</h3>
+                                                                    <p className="text-gray-500">No prohibited or restricted content keywords were found on this website.</p>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-center p-12">
+                                                            <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-700">
+                                                                <AlertOctagon size={24} className="text-gray-600" />
+                                                            </div>
+                                                            <h3 className="text-lg font-medium text-white mb-2">Content Risk Analysis Not Available</h3>
+                                                            <p className="text-gray-500">Content risk data was not found in this scan report.</p>
                                                         </div>
                                                     )}
                                                 </div>

@@ -159,16 +159,19 @@ class PageClassifier:
         'about': {
             'url_patterns': [
                 (r'about[-_]?us', 1.0),
-                (r'/about/?$', 0.9),
-                (r'who[-_]?we[-_]?are', 0.8),
-                (r'our[-_]?story', 0.8),
-                (r'company', 0.6),
+                (r'/about/?$', 0.95),
+                (r'who[-_]?we[-_]?are', 0.9),
+                (r'our[-_]?story', 0.9),
+                (r'[-/][a-z]+-story/?$', 0.85),  # Matches /idfy-story/, /company-story/, etc.
+                (r'/company/?$', 0.85),
+                (r'/story/?$', 0.8),
             ],
             'text_patterns': [
                 (r'about\s*us', 1.0),
                 (r'who\s*we\s*are', 0.9),
-                (r'our\s*story', 0.8),
-                (r'about', 0.5),
+                (r'our\s*story', 0.85),
+                (r'^company$', 0.8),  # Exact match for "Company" link text
+                # NOTE: Generic 'about' removed - too many false positives from blog titles
             ]
         },
         'contact': {
@@ -210,6 +213,24 @@ class PageClassifier:
                 (r'shop', 0.5),
             ]
         },
+        'solutions': {
+            'url_patterns': [
+                (r'/solutions?/?$', 1.0),
+                (r'/services?/?$', 1.0),
+                (r'/offerings?/?$', 0.9),
+                (r'/platform/?$', 0.8),
+                (r'/capabilities/?$', 0.7),
+                (r'/what[-_]?we[-_]?do/?$', 0.8),
+            ],
+            'text_patterns': [
+                (r'^solutions?$', 1.0),
+                (r'^services?$', 1.0),
+                (r'our\s*solutions?', 0.9),
+                (r'our\s*services?', 0.9),
+                (r'what\s*we\s*(do|offer)', 0.8),
+                (r'platform', 0.6),
+            ]
+        },
         'faq': {
             'url_patterns': [
                 (r'/faq/?$', 1.0),
@@ -237,9 +258,15 @@ class PageClassifier:
         },
         'blog': {
             'url_patterns': [
+                (r'/blog/', 1.0),  # Matches any blog path (including posts)
                 (r'/blog/?$', 1.0),
+                (r'/news/', 0.9),
                 (r'/news/?$', 0.8),
+                (r'/articles?/', 0.8),
                 (r'/articles?/?$', 0.7),
+                (r'/insights/', 0.7),
+                (r'/resources/', 0.6),
+                (r'/webinars?/', 0.6),
             ],
             'text_patterns': [
                 (r'blog', 1.0),
@@ -247,6 +274,24 @@ class PageClassifier:
             ]
         },
     }
+    
+    # URL patterns that indicate content pages (blogs, news, etc.) that should not be classified as policy pages
+    CONTENT_URL_PATTERNS = [
+        r'/blog/',
+        r'/blogs/',
+        r'/news/',
+        r'/article/',
+        r'/articles/',
+        r'/post/',
+        r'/posts/',
+        r'/insights/',
+        r'/resources/',
+        r'/webinars?/',
+        r'/events?/',
+        r'/press/',
+        r'/media/',
+        r'/case[-_]?stud(y|ies)/',
+    ]
     
     # Skip patterns - URLs to ignore
     SKIP_PATTERNS = [
@@ -262,6 +307,15 @@ class PageClassifier:
         r'tel:',
         r'#',
     ]
+    
+    @classmethod
+    def _is_content_url(cls, url: str) -> bool:
+        """Check if URL is a content page (blog, news, article) that shouldn't be classified as policy."""
+        url_lower = url.lower()
+        for pattern in cls.CONTENT_URL_PATTERNS:
+            if re.search(pattern, url_lower):
+                return True
+        return False
     
     @classmethod
     def classify(cls, url: str, anchor_text: str = "", title: str = "") -> Dict[str, any]:
@@ -286,10 +340,21 @@ class PageClassifier:
         anchor_lower = anchor_text.lower() if anchor_text else ""
         title_lower = title.lower() if title else ""
         
+        # Check if this is a content URL (blog, news, etc.) - these should NOT be classified as policy pages
+        is_content_url = cls._is_content_url(url)
+        
         best_type = "other"
         best_confidence = 0.0
         
+        # Policy page types that should not match content URLs
+        policy_types = {'about', 'contact', 'privacy_policy', 'terms_conditions', 
+                       'refund_policy', 'shipping_delivery', 'faq', 'product', 'pricing', 'solutions'}
+        
         for page_type, patterns in cls.PAGE_PATTERNS.items():
+            # Skip policy page types for content URLs (blogs shouldn't be classified as "about", etc.)
+            if is_content_url and page_type in policy_types:
+                continue
+            
             confidence = 0.0
             
             # Check URL patterns
@@ -331,6 +396,7 @@ class PageClassifier:
             'contact': 80,
             'pricing': 75,
             'product': 70,
+            'solutions': 70,  # SaaS/service companies - equally important as products
             'shipping_delivery': 65,
             'faq': 50,
             'docs': 40,

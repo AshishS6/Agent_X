@@ -36,6 +36,11 @@ class CrawlCache:
         """
         Retrieve a page from cache if it exists and hasn't expired.
         """
+        # Fast path: skip cache if DB is unavailable
+        from shared.db_utils import is_db_available
+        if not is_db_available():
+            return None
+        
         try:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -75,6 +80,11 @@ class CrawlCache:
         Save a page to the cache.
         """
         if not page_data.html or page_data.status != 200:
+            return
+
+        # Fast path: skip cache if DB is unavailable
+        from shared.db_utils import is_db_available
+        if not is_db_available():
             return
 
         ttl = self._get_ttl(page_data.page_type)

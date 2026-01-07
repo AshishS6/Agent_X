@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS agents (
   description TEXT,
   status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'error')),
   config JSONB DEFAULT '{}',
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Index on agent type for fast lookups
@@ -33,9 +33,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   priority VARCHAR(10) DEFAULT 'medium' 
     CHECK (priority IN ('high', 'medium', 'low')),
   error TEXT,
-  started_at TIMESTAMP,
-  completed_at TIMESTAMP,
-  created_at TIMESTAMP DEFAULT NOW()
+  started_at TIMESTAMP WITH TIME ZONE,
+  completed_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Indexes for task queries
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   role VARCHAR(20) NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
   content TEXT NOT NULL,
   metadata JSONB DEFAULT '{}',
-  created_at TIMESTAMP DEFAULT NOW()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_conversations_agent_id ON conversations(agent_id);
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS agent_metrics (
   agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
   metric_type VARCHAR(50) NOT NULL,
   value NUMERIC NOT NULL,
-  timestamp TIMESTAMP DEFAULT NOW()
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_metrics_agent_id ON agent_metrics(agent_id);
@@ -80,8 +80,8 @@ CREATE TABLE IF NOT EXISTS integrations (
   status VARCHAR(20) DEFAULT 'disconnected' 
     CHECK (status IN ('connected', 'error', 'disconnected')),
   config JSONB DEFAULT '{}',
-  last_sync TIMESTAMP,
-  created_at TIMESTAMP DEFAULT NOW()
+  last_sync TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_integrations_type ON integrations(type);

@@ -5,7 +5,7 @@ Normalized page data structures for crawl results
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from bs4 import BeautifulSoup
 
 
@@ -82,6 +82,7 @@ class CrawlMetadata:
     crawl_time_ms: int = 0
     pages_fetched: int = 0
     pages_discovered: int = 0
+    pages_skipped: int = 0  # Pages skipped due to robots.txt, errors, or budget limits
     sitemap_found: bool = False
     sitemap_urls_count: int = 0
     robots_checked: bool = False
@@ -105,9 +106,17 @@ class NormalizedPageGraph:
     Provides methods to access pages by type.
     """
     
-    # Required pages for early-exit check
+    # Required pages for early-exit check (core compliance pages)
     REQUIRED_PAGES = {'privacy_policy', 'terms_conditions'}
-    HIGH_VALUE_PAGES = {'about', 'contact', 'pricing', 'product'}
+    
+    # High value pages for comprehensive analysis
+    HIGH_VALUE_PAGES = {'about', 'contact', 'pricing', 'product', 'solutions', 'faq'}
+    
+    # All policy detail pages we want to discover
+    POLICY_DETAIL_PAGES = {
+        'home', 'privacy_policy', 'terms_conditions', 'about', 'contact',
+        'faq', 'product', 'solutions', 'refund_policy', 'shipping_delivery'
+    }
     
     def __init__(self, root_url: str):
         self.root_url = root_url
@@ -186,6 +195,31 @@ class NormalizedPageGraph:
             page_type for page_type, page in self.pages.items()
             if isinstance(page, PageData) and page.status == 200
         ]
+    
+    def get_crawl_summary(self) -> Dict[str, Any]:
+        """
+        Get crawl summary per PRD V2.1.1 requirements.
+        Standardized to always include: pages discovered, pages fetched, pages skipped,
+        early exit reason, robots.txt respected, sitemap used.
+        
+        Per PRD V2.1.1: Must answer "Why didn't it find X?" from UI alone.
+        """
+        return {
+            "pages_discovered": self.metadata.pages_discovered,
+            "pages_fetched": self.metadata.pages_fetched,
+            "pages_skipped": self.metadata.pages_skipped,
+            "early_exit": self.metadata.early_exit,
+            "early_exit_reason": self.metadata.early_exit_reason or "None (crawl completed normally)",
+            "crawl_time_ms": self.metadata.crawl_time_ms,
+            # Per PRD V2.1.1: Explicit Yes/No for robots.txt and sitemap
+            "robots_txt_respected": "Yes" if self.metadata.robots_checked else "No",
+            "sitemap_used": "Yes" if self.metadata.sitemap_found else "No",
+            # Additional transparency fields
+            "robots_checked": self.metadata.robots_checked,
+            "sitemap_found": self.metadata.sitemap_found,
+            "sitemap_urls_count": self.metadata.sitemap_urls_count,
+            "errors": self.metadata.errors  # Per PRD: Show what went wrong
+        }
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""

@@ -10,7 +10,7 @@ from datetime import datetime
 class SiteScanReportBuilder:
     """Builds structured site scan reports"""
     
-    VERSION = "v1.0"  # Will increment as we add features
+    VERSION = "v2.1.1"  # Per PRD V2.1.1
     
     def __init__(self):
         self.report = {}

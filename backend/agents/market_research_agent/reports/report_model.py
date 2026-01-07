@@ -18,8 +18,8 @@ class ReportModel:
     This is a TRANSFORMATION layer, not a passthrough.
     """
     
-    REPORT_VERSION = "v1"
-    ENGINE_VERSION = "E.2"
+    REPORT_VERSION = "v2.1.1"  # Per PRD V2.1.1
+    ENGINE_VERSION = "v2.1.1"
     
     def __init__(self):
         self.severity_rules = SeverityRules()
@@ -203,8 +203,11 @@ class ReportModel:
         compliance_intel = scan.get('compliance_intelligence', {})
         breakdown = compliance_intel.get('breakdown', {})
         
-        return {
+        # Per PRD V2.1.1: Preserve signal classification and evidence
+        scores = {
             "overall": compliance_intel.get('score', 0),
+            "advisory_score": compliance_intel.get('advisory_score', compliance_intel.get('score', 0)),  # Per PRD: Label as Advisory Score
+            "label": compliance_intel.get('label', 'Advisory Score'),  # Per PRD
             "technical": breakdown.get('technical', {}).get('score', 0),
             "policy": breakdown.get('policy', {}).get('score', 0),
             "trust": breakdown.get('trust', {}).get('score', 0),
@@ -212,8 +215,13 @@ class ReportModel:
                 "technical": 30,
                 "policy": 40,
                 "trust": 30
-            }
+            },
+            "signal_type": compliance_intel.get('signal_type', 'advisory'),
+            "breakdown_visible": compliance_intel.get('breakdown_visible', True),
+            "breakdown_details": breakdown  # Preserve full breakdown with evidence
         }
+        
+        return scores
     
     def _build_context(self, scan: Dict[str, Any], business_context: Dict[str, Any]) -> Dict[str, Any]:
         """Build business context section"""
@@ -238,33 +246,49 @@ class ReportModel:
         mcc_codes = scan.get('mcc_codes', {})
         primary = mcc_codes.get('primary_mcc')
         
+        # Per PRD V2.1.1: Preserve evidence and signal classification
         if not primary:
             return {
                 "primary_mcc": None,
                 "confidence": 0.0,
                 "keywords_matched": [],
-                "secondary_mccs": []
+                "secondary_mccs": [],
+                "signal_type": mcc_codes.get('signal_type', 'advisory'),
+                "min_confidence_threshold": mcc_codes.get('min_confidence_threshold', 30.0)
             }
         
         secondary = mcc_codes.get('secondary_mcc')
         all_matches = mcc_codes.get('all_matches', [])
         
-        return {
-            "primary_mcc": {
-                "code": primary.get('mcc_code', ''),
-                "description": primary.get('description', ''),
-                "category": primary.get('category', ''),
-                "confidence": primary.get('confidence', 0.0)
-            },
+        # Preserve evidence from primary MCC
+        primary_data = {
+            "code": primary.get('mcc_code', ''),
+            "description": primary.get('description', ''),
+            "category": primary.get('category', ''),
             "confidence": primary.get('confidence', 0.0),
             "keywords_matched": primary.get('keywords_matched', []),
-            "secondary_mccs": [
-                {
-                    "code": secondary.get('mcc_code', ''),
-                    "description": secondary.get('description', ''),
-                    "confidence": secondary.get('confidence', 0.0)
-                }
-            ] if secondary else []
+            "evidence": primary.get('evidence'),  # Per PRD: Preserve evidence
+            "low_confidence": primary.get('low_confidence', False),
+            "status": primary.get('status')
+        }
+        
+        secondary_data = None
+        if secondary:
+            secondary_data = {
+                "code": secondary.get('mcc_code', ''),
+                "description": secondary.get('description', ''),
+                "confidence": secondary.get('confidence', 0.0),
+                "evidence": secondary.get('evidence')  # Preserve evidence
+            }
+        
+        return {
+            "primary_mcc": primary_data,
+            "confidence": primary.get('confidence', 0.0),
+            "keywords_matched": primary.get('keywords_matched', []),
+            "secondary_mccs": [secondary_data] if secondary_data else [],
+            "signal_type": mcc_codes.get('signal_type', 'advisory'),
+            "min_confidence_threshold": mcc_codes.get('min_confidence_threshold', 30.0),
+            "all_matches": all_matches  # Include all matches with evidence
         }
     
     def _build_recommendations(self, scan: Dict[str, Any], business_context: Dict[str, Any]) -> List[str]:

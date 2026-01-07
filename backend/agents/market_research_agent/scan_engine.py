@@ -12,8 +12,10 @@ import requests
 import asyncio
 import uuid
 import time
+import threading
 from datetime import datetime
 from urllib.parse import urlparse
+from typing import List
 import re
 import logging
 
@@ -40,7 +42,7 @@ from crawlers.page_graph import NormalizedPageGraph
 class ModularScanEngine:
     """V2 Scan Engine using modular architecture with CrawlOrchestrator"""
     
-    VERSION = "v2.1"  # Upgraded with CrawlOrchestrator
+    VERSION = "v2.1.1"  # Per PRD V2.1.1 - Accuracy & Trust Hardening
     
     def __init__(self, logger=None):
         self.logger = logger or logging.getLogger(__name__)
@@ -100,8 +102,13 @@ class ModularScanEngine:
             
             # Use CrawlOrchestrator for parallel page discovery
             self.logger.info("[V2.1] Running CrawlOrchestrator...")
+            
             crawl_start_time = time.monotonic()
+            # Run crawl in async context
+            # Use asyncio.run() which creates a new event loop and ensures it's closed after completion
             page_graph = asyncio.run(self.orchestrator.crawl(url, scan_id=scan_id))
+            # After asyncio.run() completes, the event loop is automatically closed
+            # This ensures no hanging async resources prevent process exit
             crawl_duration = time.monotonic() - crawl_start_time
             
             # Phase 10: Post-Crawl Analysis Start
@@ -158,7 +165,21 @@ class ModularScanEngine:
             # Gating Logic
             if scan_status["status"] != "SUCCESS":
                  self.logger.warning(f"[V2.1] Scan Failed: {scan_status['reason']}")
-                 # Return limited report
+                 
+                 # Still fetch RDAP data even for failed crawls - it doesn't depend on website content
+                 rdap_details = {}
+                 try:
+                     self.logger.info(f"[V2.1] Fetching RDAP for failed crawl: {domain}")
+                     compliance_data_temp = {"general": {"pass": True, "alerts": []}}
+                     rdap_details = self._check_domain_age(domain, compliance_data_temp)
+                     self.logger.info(f"[V2.1] RDAP fetched successfully for {domain}")
+                 except Exception as e:
+                     self.logger.warning(f"[V2.1] RDAP fetch failed: {e}")
+                     rdap_details = {"error": str(e)}
+                 
+                 # Return limited report with RDAP data
+                 crawl_summary = page_graph.get_crawl_summary()
+                 
                  final_report = {
                      "comprehensive_site_scan": {
                             "scan_status": scan_status,
@@ -169,6 +190,8 @@ class ModularScanEngine:
                                 "pages_scanned": len(page_graph.pages),
                                 "duration": 0
                             },
+                            "crawl_summary": crawl_summary,
+                            "rdap": rdap_details,  # Include RDAP even for failed crawls
                              # Empty placeholders to prevent frontend crashes if it ignores status check (backstop)
                             "compliance_intelligence": None, 
                             "business_context": None
@@ -225,8 +248,11 @@ class ModularScanEngine:
             # Check SSL
             self._check_ssl(parsed_url, domain, compliance_data)
             
-            # Check domain age
-            domain_vintage_days = self._check_domain_age(domain, compliance_data)
+            # Check domain age + RDAP details
+            rdap_details = self._check_domain_age(domain, compliance_data)
+            domain_vintage_days = rdap_details.get("age_days")
+            # Attach RDAP details early to report structure
+            report_builder.report["rdap"] = rdap_details
             
             compliance_duration = time.monotonic() - compliance_start_time
             compliance_passed = compliance_data["general"]["pass"] and compliance_data["payment_terms"]["pass"]
@@ -248,6 +274,9 @@ class ModularScanEngine:
                 policy_pages = PolicyDetector.detect_policies(all_links, final_url)
                 
                 # Enhance policy_pages with pages discovered by orchestrator
+                # Per PRD V2.1.1: Add evidence for policy detection
+                from analyzers.evidence_builder import EvidenceBuilder
+                
                 page_type_mapping = {
                     'about': 'about_us',
                     'contact': 'contact_us',
@@ -257,17 +286,82 @@ class ModularScanEngine:
                     'shipping_delivery': 'shipping_delivery',
                     'product': 'product',
                     'pricing': 'pricing',
-                    'faq': 'faq'
+                    'faq': 'faq',
+                    'solutions': 'solutions'
                 }
                 for graph_type, policy_key in page_type_mapping.items():
                     page = page_graph.get_page_by_type(graph_type)
                     if page and page.status == 200 and policy_key in policy_pages:
                         if not policy_pages[policy_key].get('found'):
+                            # Build evidence for page graph discovery
+                            evidence = EvidenceBuilder.build_policy_evidence(
+                                policy_url=page.url,
+                                detection_method="page_graph",
+                                page_title=page.page_type
+                            )
+                            
                             policy_pages[policy_key] = {
                                 'found': True,
                                 'url': page.url,
-                                'status': f"{policy_key.replace('_', ' ').title()} page discovered by orchestrator"
+                                'status': f"{policy_key.replace('_', ' ').title()} page detected",  # Changed to "detected"
+                                'detection_method': 'page_graph',
+                                'evidence': evidence
                             }
+                
+                # Validate policy URLs and prefer PageGraph candidates if detected
+                # This fixes cases where anchor detection pointed to a wrong/404 link (e.g., ?page_id=3)
+                reverse_mapping = {
+                    'about_us': 'about',
+                    'contact_us': 'contact',
+                    'privacy_policy': 'privacy_policy',
+                    'terms_condition': 'terms_conditions',
+                    'returns_refund': 'refund_policy',
+                    'shipping_delivery': 'shipping_delivery',
+                    'product': 'product',
+                    'pricing': 'pricing',
+                    'faq': 'faq',
+                    'solutions': 'solutions'
+                }
+                for key, data in list(policy_pages.items()):
+                    if key == 'home_page':
+                        continue
+                    graph_type = reverse_mapping.get(key)
+                    graph_page = page_graph.get_page_by_type(graph_type) if graph_type else None
+                    
+                    # PRIORITY 1: If page graph has a valid page, use it (most reliable)
+                    if graph_page and graph_page.status == 200 and graph_page.url:
+                        policy_pages[key]['found'] = True
+                        policy_pages[key]['url'] = graph_page.url
+                        policy_pages[key]['status'] = f"{key.replace('_', ' ').title()} page validated via page graph (HTTP 200)"
+                        policy_pages[key]['detection_method'] = 'page_graph'
+                        policy_pages[key]['evidence'] = {
+                            "source_url": graph_page.url,
+                            "triggering_rule": "Validated via PageGraph (HTTP 200)",
+                            "evidence_snippet": "status: 200",
+                            "confidence": 100.0
+                        }
+                    elif data.get('found'):
+                        # PRIORITY 2: Validate anchor-detected URL
+                        url_to_check = data.get('url')
+                        
+                        # Skip validation if URL is clearly invalid (javascript:, mailto:, etc.)
+                        if not url_to_check or not url_to_check.startswith(('http://', 'https://')):
+                            # Invalid URL detected - mark as not found if no graph alternative
+                            policy_pages[key]['found'] = False
+                            policy_pages[key]['status'] = f"Detected link invalid (non-HTTP URL: {url_to_check[:50]}). Removed."
+                            policy_pages[key]['url'] = ""
+                        else:
+                            # Validate by fetching
+                            try:
+                                fetched = crawler.fetch_page(url_to_check)
+                                if not fetched or not fetched.get('success') or fetched.get('status_code') != 200:
+                                    # Invalid response - mark as not found
+                                    policy_pages[key]['found'] = False
+                                    policy_pages[key]['status'] = f"Detected link invalid (HTTP {fetched.get('status_code', 'unknown')}). Removed."
+                                    policy_pages[key]['url'] = ""
+                            except Exception as e:
+                                # On fetch error, mark as uncertain but keep it
+                                policy_pages[key]['status'] = f"{policy_pages[key].get('status','Detected')} (validation error: {str(e)[:50]})"
                 
                 report_builder.add_policy_details(policy_pages)
                 
@@ -357,10 +451,6 @@ class ModularScanEngine:
                 }
                 report_builder.add_business_details(enhanced_business_details)
                 
-                # Content Risk Analysis
-                content_risk = ContentAnalyzer.analyze_content_risk(page_text)
-                report_builder.add_content_risk(content_risk)
-                
                 # Enhanced Product Indicators (Scraping-based)
                 product_indicators = ContentAnalyzer.detect_product_indicators(page_text)
                 
@@ -372,6 +462,271 @@ class ModularScanEngine:
                 product_indicators["pricing_model"] = "Not identified"
                 product_indicators["target_audience"] = "General"
                 product_indicators["extracted_products"] = []
+                
+                # Extract products from homepage navigation menu (before processing other pages)
+                # This captures products listed in navigation dropdowns like open.money
+                try:
+                    if soup:
+                        self.logger.info(f"[V2.1] Starting product extraction from navigation...")
+                        # Look for navigation menus
+                        nav_elements = soup.find_all(['nav', 'header'], limit=3)
+                        self.logger.debug(f"[V2.1] Found {len(nav_elements)} navigation elements")
+                        nav_products = []
+                        
+                        # First, find the "Products" menu item to identify its dropdown
+                        products_menu = None
+                        products_menu_parent = None
+                        for nav in nav_elements:
+                            # Look for a link or button with "Products" text (case-insensitive)
+                            all_links = nav.find_all(['a', 'button'], limit=50)
+                            self.logger.debug(f"[V2.1] Checking {len(all_links)} links in nav for Products menu")
+                            for link in all_links:
+                                link_text_clean = link.get_text(strip=True).lower()
+                                if link_text_clean == 'products' or link_text_clean == 'product':
+                                    products_menu = link
+                                    # Find its parent container (usually <li> or <div>)
+                                    products_menu_parent = link.find_parent(['li', 'div', 'nav'])
+                                    self.logger.info(f"[V2.1] Found Products menu: {link.get_text(strip=True)}")
+                                    break
+                            if products_menu:
+                                break
+                        
+                        if not products_menu:
+                            self.logger.debug(f"[V2.1] No 'Products' menu found, will use broader extraction")
+                        
+                        for nav in nav_elements:
+                            # Find all links in navigation (including dropdown menus and hidden ones)
+                            # Use find_all with recursive=True to get nested links in dropdowns
+                            nav_links = nav.find_all('a', href=True, recursive=True, limit=100)  # Increased limit for dropdowns
+                            self.logger.debug(f"[V2.1] Found {len(nav_links)} total links in navigation")
+                            
+                            for link in nav_links:
+                                link_text = link.get_text(strip=True)
+                                href = link.get('href', '').lower()
+                                
+                                # Skip generic navigation items
+                                skip_texts = ['home', 'about', 'contact', 'blog', 'login', 'sign up', 'sign in', 
+                                            'get started', 'company', 'solutions', 'partners', 'pricing', 
+                                            'features', 'products', 'overview', 'menu', 'close', 'all', 'view all',
+                                            'contact sales', 'login', 'sign in', 'sign up', 'privacy', 'terms']
+                                
+                                # Check if this looks like a product name
+                                # Products are usually: 2-50 chars, not in skip list
+                                passes_basic_filter = (link_text and 
+                                    2 <= len(link_text) <= 50 and 
+                                    link_text.lower() not in [s.lower() for s in skip_texts] and
+                                    not any(skip.lower() in link_text.lower() for skip in skip_texts))
+                                
+                                
+                                if passes_basic_filter:
+                                    
+                                    # Check if URL or context suggests it's a product
+                                    is_product = False
+                                    
+                                    # Direct product indicators in URL (including industry segments)
+                                    url_indicators = ['/product', '/feature', '/solution', '/service', 
+                                                                              '/pay', '/get-paid', '/spend', '/banking', '/accounting', 
+                                                                              '/payroll', '/gst', '/invoice', '/receivables', '/payables',
+                                                                              '/startup', '/enterprise', '/sme', '/retail', '/ecommerce',
+                                                                              '/manufactur', '/healthcare', '/hospitality', '/real-estate',
+                                                                              '/software', '/technology', '/professional', '/consultant',
+                                                                              '/freelancer', '/small-business']
+                                    url_match = any(indicator in href for indicator in url_indicators)
+                                    if url_match:
+                                        is_product = True
+                                        self.logger.debug(f"[V2.1] Product candidate (URL match): {link_text} ({href})")
+                                    # Check if link is in a dropdown/submenu under "Products" menu
+                                    else:
+                                        # Find parent elements to check context
+                                        parent = link.find_parent(['li', 'div', 'ul', 'nav', 'section'])
+                                        
+                                        # Method 1: Check if link is structurally related to Products menu
+                                        if products_menu_parent:
+                                            # Check if link is a descendant of the Products menu's parent
+                                            try:
+                                                # Get all links within the Products menu parent
+                                                parent_links = products_menu_parent.find_all('a', recursive=True)
+                                                in_parent = link in parent_links and link != products_menu
+                                                if in_parent:
+                                                    is_product = True
+                                            except Exception as e:
+                                                pass
+                                        
+                                        # Method 1b: Check siblings and next elements (common dropdown pattern)
+                                        if not is_product and products_menu:
+                                            # Look for <ul> or <div> that comes after Products link (dropdown container)
+                                            next_elem = products_menu.find_next(['ul', 'div', 'nav'])
+                                            if next_elem:
+                                                try:
+                                                    if link in next_elem.find_all('a', recursive=True):
+                                                        is_product = True
+                                                except:
+                                                    pass
+                                            
+                                            # Also check parent's next siblings
+                                            if not is_product and products_menu_parent:
+                                                siblings = products_menu_parent.find_next_siblings(['ul', 'div', 'li'], limit=3)
+                                                for sibling in siblings:
+                                                    try:
+                                                        if link in sibling.find_all('a', recursive=True):
+                                                            is_product = True
+                                                            break
+                                                    except:
+                                                        pass
+                                        
+                                        # Method 2: Check parent context
+                                        if not is_product and parent:
+                                            # Get all text from parent to check for "product" context
+                                            parent_text = parent.get_text(strip=True).lower()
+                                            
+                                            # Check if parent contains "product" keyword or is in a dropdown
+                                            parent_classes = ' '.join(parent.get('class', [])).lower()
+                                            parent_id = (parent.get('id') or '').lower()
+                                            
+                                            # Check if it's in a dropdown menu (more lenient)
+                                            is_dropdown = any(keyword in parent_classes or keyword in parent_id 
+                                                            for keyword in ['dropdown', 'menu', 'submenu', 'nav', 'mega', 'flyout'])
+                                            
+                                            # Check if parent has "product" context
+                                            has_product_context = ('product' in parent_text or 
+                                                                  'product' in parent_classes or
+                                                                  'product' in parent_id)
+                                            
+                                            # Check if link is nested under a "Products" link (more lenient)
+                                            products_parent = link.find_parent('a', href=True)
+                                            if products_parent:
+                                                parent_link_text = products_parent.get_text(strip=True).lower()
+                                                if 'product' in parent_link_text:
+                                                    is_product = True
+                                            
+                                            if (is_dropdown and has_product_context):
+                                                is_product = True
+                                        
+                                        # Method 3: Check if it's a short, descriptive name that could be a product
+                                        if not is_product:
+                                            # Short product names (1-4 words) that aren't generic
+                                            words = link_text.split()
+                                            if (1 <= len(words) <= 4 and 
+                                                len(link_text) >= 3 and
+                                                not any(skip in link_text.lower() for skip in ['company', 'solutions', 'partners', 'blog', 'help', 'support', 'resources'])):
+                                                # If it's in navigation and looks like a product name, include it
+                                                # This is a fallback for cases where dropdown detection fails
+                                                if parent and any(keyword in ' '.join(parent.get('class', [])).lower() 
+                                                                  for keyword in ['nav', 'menu', 'header']):
+                                                    is_product = True
+                                                    self.logger.debug(f"[V2.1] Product candidate (fallback match): {link_text}")
+                                        
+                                        # Method 4: If no Products menu found, be more lenient with navigation links
+                                        # This catches industry segments, solutions, etc. that might be considered "products"
+                                        if not is_product and not products_menu:
+                                            # Check if it's a standalone navigation link that could be a product/solution
+                                            words = link_text.split()
+                                            if (1 <= len(words) <= 3 and 
+                                                len(link_text) >= 4 and
+                                                href.startswith('/') and  # Relative URL suggests it's a page
+                                                not href.startswith('/#') and  # Not an anchor link
+                                                not any(skip in link_text.lower() for skip in ['home', 'about', 'contact', 'blog', 'login', 'sign', 'privacy', 'terms', 'faq'])):
+                                                # Check if parent is in navigation structure
+                                                if parent:
+                                                    parent_classes = ' '.join(parent.get('class', [])).lower()
+                                                    if any(keyword in parent_classes for keyword in ['nav', 'menu', 'header', 'dropdown', 'submenu']):
+                                                        is_product = True
+                                                        self.logger.debug(f"[V2.1] Product candidate (lenient match): {link_text} ({href})")
+                                    
+                                    if is_product:
+                                        # Avoid duplicates
+                                        if not any(p['name'].lower() == link_text.lower() for p in nav_products):
+                                            nav_products.append({
+                                                "name": link_text,
+                                                "brief_description": "Product identified from navigation menu",
+                                                "price_if_found": None,
+                                                "source": "navigation"
+                                            })
+                        
+                        if nav_products:
+                            product_indicators["extracted_products"].extend(nav_products)
+                            self.logger.info(f"[V2.1] Extracted {len(nav_products)} products from navigation menu: {[p['name'] for p in nav_products[:5]]}")
+                        else:
+                            self.logger.debug(f"[V2.1] No products extracted from navigation menu")
+                            
+                        # Fallback: Extract products from homepage content sections (product cards, feature sections, etc.)
+                        if not nav_products and soup:
+                            try:
+                                content_products = []
+                                
+                                # Look for common product section patterns
+                                product_sections = soup.find_all(['section', 'div'], 
+                                                               class_=re.compile(r'product|feature|solution|service', re.I),
+                                                               limit=10)
+                                
+                                # Also look for headings that suggest products
+                                product_headings = soup.find_all(['h2', 'h3', 'h4'], 
+                                                                string=re.compile(r'product|feature|solution|service|what we|our', re.I),
+                                                                limit=10)
+                                
+                                # Extract from product sections
+                                for section in product_sections:
+                                    # Find links or headings in product sections
+                                    section_links = section.find_all('a', href=True, limit=20)
+                                    section_headings = section.find_all(['h2', 'h3', 'h4'], limit=10)
+                                    
+                                    for link in section_links:
+                                        link_text = link.get_text(strip=True)
+                                        if (link_text and 3 <= len(link_text) <= 50 and
+                                            link_text.lower() not in ['learn more', 'read more', 'get started', 'view all', 'see all']):
+                                            # Check if it looks like a product name
+                                            if not any(skip in link_text.lower() for skip in ['home', 'about', 'contact', 'blog', 'login']):
+                                                if not any(p['name'].lower() == link_text.lower() for p in content_products):
+                                                    content_products.append({
+                                                        "name": link_text,
+                                                        "brief_description": "Product identified from homepage content",
+                                                        "price_if_found": None,
+                                                        "source": "homepage_content"
+                                                    })
+                                    
+                                    for heading in section_headings:
+                                        heading_text = heading.get_text(strip=True)
+                                        if (heading_text and 3 <= len(heading_text) <= 50 and
+                                            heading_text.lower() not in ['products', 'features', 'solutions', 'services']):
+                                            if not any(p['name'].lower() == heading_text.lower() for p in content_products):
+                                                content_products.append({
+                                                    "name": heading_text,
+                                                    "brief_description": "Product identified from homepage heading",
+                                                    "price_if_found": None,
+                                                    "source": "homepage_content"
+                                                })
+                                
+                                # Extract from product headings context
+                                for heading in product_headings:
+                                    # Get parent section
+                                    parent_section = heading.find_parent(['section', 'div', 'article'])
+                                    if parent_section:
+                                        # Find links or sub-headings in this section
+                                        section_items = parent_section.find_all(['a', 'h3', 'h4'], limit=15)
+                                        for item in section_items:
+                                            item_text = item.get_text(strip=True)
+                                            if (item_text and 3 <= len(item_text) <= 50 and
+                                                item_text != heading.get_text(strip=True) and
+                                                item_text.lower() not in ['learn more', 'read more', 'get started', 'view all']):
+                                                if not any(p['name'].lower() == item_text.lower() for p in content_products):
+                                                    content_products.append({
+                                                        "name": item_text,
+                                                        "brief_description": "Product identified from homepage section",
+                                                        "price_if_found": None,
+                                                        "source": "homepage_content"
+                                                    })
+                                
+                                if content_products:
+                                    # Limit to top 10 to avoid noise
+                                    content_products = content_products[:10]
+                                    product_indicators["extracted_products"].extend(content_products)
+                                    self.logger.info(f"[V2.1] Extracted {len(content_products)} products from homepage content: {[p['name'] for p in content_products[:5]]}")
+                                    
+                            except Exception as e2:
+                                self.logger.debug(f"[V2.1] Homepage content product extraction warning: {e2}")
+                            
+                except Exception as e:
+                    self.logger.warning(f"[V2.1] Navigation product extraction warning: {e}", exc_info=True)
                 
                 # Extract products/pricing from product and pricing pages (use pre-fetched when available)
                 content_for_extraction = page_text
@@ -432,8 +787,13 @@ class ModularScanEngine:
                 elif "consumer" in content_for_extraction or "personal" in content_for_extraction:
                     product_indicators["target_audience"] = "Consumers"
                 
-                # Extract product names from headings (simple heuristic)
+                # Extract additional products from product page headings (if product page found)
+                # Note: Navigation products were already extracted above (lines 395-454)
                 try:
+                    # Start with products already extracted from navigation
+                    extracted_products = product_indicators["extracted_products"].copy()
+                    
+                    # Extract from product page headings (if product page found)
                     if prod_soup:
                         h2_tags = prod_soup.find_all(['h2', 'h3'], limit=10)
                         for h_tag in h2_tags:
@@ -442,20 +802,380 @@ class ModularScanEngine:
                             if heading_text and len(heading_text) > 3 and len(heading_text) < 100:
                                 skip_words = ['about', 'contact', 'home', 'menu', 'navigation', 'footer', 'header']
                                 if not any(sw in heading_text.lower() for sw in skip_words):
-                                    product_indicators["extracted_products"].append({
+                                    # Check if not already extracted from nav
+                                    if not any(p['name'].lower() == heading_text.lower() for p in extracted_products):
+                                        extracted_products.append({
                                         "name": heading_text,
-                                        "brief_description": "Product/Feature identified from page",
-                                        "price_if_found": None
-                                    })
-                        # Limit to first 5 products
-                        product_indicators["extracted_products"] = product_indicators["extracted_products"][:5]
+                                            "brief_description": "Product/Feature identified from page headings",
+                                            "price_if_found": None,
+                                            "source": "page_headings"
+                                        })
+                    
+                    # If still no products, try extracting from homepage content sections
+                    if len(extracted_products) == 0:
+                        if soup:
+                            # Look for common product listing patterns
+                            product_sections = soup.find_all(['section', 'div'], class_=re.compile(r'product|feature|service|solution', re.I), limit=5)
+                            for section in product_sections:
+                                # Look for headings or links in product sections
+                                section_headings = section.find_all(['h2', 'h3', 'h4'], limit=5)
+                                for heading in section_headings:
+                                    heading_text = heading.get_text(strip=True)
+                                    if heading_text and 3 < len(heading_text) < 60:
+                                        skip_words = ['about', 'contact', 'home', 'menu', 'navigation', 'footer', 'header', 'overview', 'features']
+                                        if not any(sw in heading_text.lower() for sw in skip_words):
+                                            extracted_products.append({
+                                                "name": heading_text,
+                                                "brief_description": "Product identified from homepage section",
+                                                "price_if_found": None,
+                                                "source": "homepage_section"
+                                            })
+                    
+                    # Final fallback: Extract from homepage HTML by parsing ALL links (including hidden ones)
+                    # This catches cases like open.money where products are listed as industry segments
+                    # but the navigation menu is JavaScript-rendered and not in static HTML
+                    # We parse the soup directly to find ALL <a> tags, even in hidden dropdowns
+                    if len(extracted_products) == 0 and soup:
+                        self.logger.info(f"[V2.1] Using final fallback: extracting from all homepage links (including hidden)")
+                        
+                        # Extract ALL links from homepage HTML (including hidden dropdowns)
+                        # Use recursive=True to get nested links
+                        all_homepage_links = soup.find_all('a', href=True, recursive=True)
+                        
+                        solution_indicators = ['startup', 'enterprise', 'sme', 'retail', 'ecommerce', 'manufactur',
+                                              'healthcare', 'hospitality', 'real-estate', 'software', 'technology',
+                                              'professional', 'consultant', 'freelancer', 'small-business', 'business']
+                        
+                        skip_url_patterns = ['/blog', '/contact', '/about', '/privacy', '/terms', '/pricing', '/faq', '/help']
+                        skip_text_patterns = ['blog', 'contact', 'about', 'privacy', 'terms', 'pricing', 'faq', 'help', 'login', 'sign', 'get started']
+                        
+                        for link in all_homepage_links:
+                            href = link.get('href', '')
+                            if not href:
+                                continue
+                            
+                            # Get link text - try direct text first, then get_text() for nested content
+                            link_text = link.string
+                            if not link_text or not link_text.strip():
+                                link_text = link.get_text(strip=True)
+                            
+                            # Skip if still no text (but continue for URL-based extraction)
+                            if not link_text or not link_text.strip():
+                                # Still try to extract from URL if it looks like a product
+                                link_text = ""
+                            
+                            try:
+                                # Resolve relative URLs
+                                from urllib.parse import urljoin
+                                full_url = urljoin(final_url, href)
+                                parsed = urlparse(full_url)
+                                
+                                # Only process internal links
+                                if parsed.netloc and parsed.netloc.lower() not in [urlparse(final_url).netloc.lower(), '']:
+                                    continue
+                                
+                                path = parsed.path.lower()
+                                
+                                # Skip obvious non-product pages
+                                if any(skip in path for skip in skip_url_patterns):
+                                    continue
+                                
+                                # Skip if link text suggests it's not a product
+                                if link_text and any(skip in link_text.lower() for skip in skip_text_patterns):
+                                    continue
+                                
+                                # Check if link is in a Products dropdown menu
+                                is_in_products_menu = False
+                                parent = link.find_parent(['li', 'div', 'ul', 'nav'])
+                                if parent:
+                                    parent_text = parent.get_text(strip=True).lower()
+                                    parent_classes = ' '.join(parent.get('class', [])).lower()
+                                    parent_id = (parent.get('id') or '').lower()
+                                    
+                                    # Check if parent contains "product" context
+                                    if ('product' in parent_text or 'product' in parent_classes or 'product' in parent_id):
+                                        is_in_products_menu = True
+                                    
+                                    # Also check if link is under a "Products" menu item
+                                    products_parent_link = link.find_parent('a', href=True)
+                                    if products_parent_link:
+                                        parent_link_text = products_parent_link.get_text(strip=True)
+                                        if parent_link_text and re.match(r'^products?$', parent_link_text, re.I):
+                                            is_in_products_menu = True
+                                
+                                # Also check if link text itself suggests it's a product (common product names)
+                                product_keywords = ['pay', 'get paid', 'spend', 'banking', 'account', 'card', 'loan', 'investment', 'payroll', 'accounting', 'invoice', 'integration']
+                                if not is_in_products_menu and link_text:
+                                    link_text_lower = link_text.lower()
+                                    if any(keyword in link_text_lower for keyword in product_keywords):
+                                        # Check if it's not a generic navigation term
+                                        if not any(skip in link_text_lower for skip in ['contact', 'about', 'blog', 'help', 'login', 'sign']):
+                                            is_in_products_menu = True
+                                
+                                # Check if URL suggests it's a solution/industry page
+                                matches_indicator = any(ind in path for ind in solution_indicators)
+                                
+                                # Extract product if:
+                                # 1. It's in a Products menu, OR
+                                # 2. It matches industry indicators, OR
+                                # 3. It's a short descriptive name that looks like a product, OR
+                                # 4. URL path suggests it's a product (even without link text)
+                                should_extract = False
+                                product_name = None
+                                
+                                # Check URL for product indicators
+                                url_product_indicators = ['pay', 'payment', 'account', 'banking', 'card', 'loan', 'investment', 'payroll', 'accounting', 'invoice', 'integration', 'spend', 'vendor']
+                                url_looks_like_product = any(ind in path for ind in url_product_indicators)
+                                
+                                if is_in_products_menu:
+                                    # Use link text as product name if in Products menu
+                                    if link_text and link_text.strip():
+                                        product_name = link_text.strip()
+                                        should_extract = True
+                                    elif url_looks_like_product:
+                                        # Extract from URL if no link text
+                                        path_parts = [p for p in path.strip('/').split('/') if p]
+                                        if path_parts:
+                                            product_name = path_parts[-1].replace('-', ' ').replace('_', ' ').title()
+                                            should_extract = True
+                                elif matches_indicator:
+                                    # Extract from URL path for industry segments
+                                    path_parts = [p for p in path.strip('/').split('/') if p]
+                                    if path_parts:
+                                        product_name = path_parts[-1].replace('-', ' ').replace('_', ' ').title()
+                                        should_extract = True
+                                elif link_text and 2 <= len(link_text.strip()) <= 50:
+                                    # Check if link text looks like a product name
+                                    # Products are usually: short descriptive names, not generic navigation
+                                    words = link_text.strip().split()
+                                    if (1 <= len(words) <= 5 and 
+                                        not any(skip in link_text.lower() for skip in ['go to', 'learn more', 'read more', 'view all', 'see all', 'all'])):
+                                        # Check if URL path suggests it's a product page (not a category)
+                                        if path and len(path) > 1 and not any(cat in path for cat in ['/category', '/tag', '/archive', '/page']):
+                                            product_name = link_text.strip()
+                                            should_extract = True
+                                elif url_looks_like_product and path and len(path) > 1:
+                                    # Extract from URL even if no link text
+                                    path_parts = [p for p in path.strip('/').split('/') if p]
+                                    if path_parts:
+                                        product_name = path_parts[-1].replace('-', ' ').replace('_', ' ').title()
+                                        should_extract = True
+                                
+                                if should_extract and product_name:
+                                    # Clean up the name
+                                    if product_name and 2 <= len(product_name) <= 50:
+                                        if not any(p['name'].lower() == product_name.lower() for p in extracted_products):
+                                            extracted_products.append({
+                                                "name": product_name,
+                                                "brief_description": f"Product: {product_name}" if is_in_products_menu else f"Solution for {product_name}",
+                                                "price_if_found": None,
+                                                "source": "homepage_html_products_menu" if is_in_products_menu else "homepage_html"
+                                            })
+                                            self.logger.debug(f"[V2.1] Extracted from homepage HTML: {product_name} ({path})")
+                            except Exception as e:
+                                continue
+                        
+                        if len(extracted_products) > 0:
+                            self.logger.info(f"[V2.1] Fallback extraction from homepage HTML found {len(extracted_products)} products/solutions")
+                    
+                    # Filter and prioritize products
+                    # Remove non-product items (policies, careers, etc.)
+                    non_product_keywords = ['policy', 'career', 'grievance', 'disclosure', 'guideline', 'corporate information', 
+                                          'connect with us', 'email', 'hiring', 'we\'re hiring', 'contact', 'about', 'blog']
+                    
+                    filtered_products = []
+                    for product in extracted_products:
+                        product_name_lower = product.get('name', '').lower()
+                        # Skip if it's clearly not a product
+                        if any(non_prod in product_name_lower for non_prod in non_product_keywords):
+                            continue
+                        filtered_products.append(product)
+                    
+                    # Prioritize: products from products menu first, then URL-based products, then industry segments
+                    prioritized_products = []
+                    # 1. Products from products menu (highest priority)
+                    for product in filtered_products:
+                        if product.get('source') == 'homepage_html_products_menu':
+                            prioritized_products.append(product)
+                    
+                    # 2. URL-based products (medium priority)
+                    for product in filtered_products:
+                        if product.get('source') == 'homepage_html' and 'solution for' not in product.get('brief_description', '').lower():
+                            if product not in prioritized_products:
+                                prioritized_products.append(product)
+                    
+                    # 3. Industry segments (lowest priority, only if we don't have enough real products)
+                    if len(prioritized_products) < 15:
+                        for product in filtered_products:
+                            if product not in prioritized_products:
+                                prioritized_products.append(product)
+                    
+                    # Limit to top 20 products (prioritized)
+                    prioritized_products = prioritized_products[:20]
+                    
+                    product_indicators["extracted_products"] = prioritized_products
+                    
+                    if len(extracted_products) > 0:
+                        self.logger.info(f"[V2.1] Total extracted products: {len(extracted_products)} (from navigation and pages)")
+                    
                 except Exception as e:
                     self.logger.warning(f"[V2.1] Product extraction warning: {e}")
                 
+                # Log final product indicators before adding to report
+                final_product_count = len(product_indicators.get("extracted_products", []))
+                self.logger.info(f"[V2.1] Final product count: {final_product_count}")
+                if final_product_count > 0:
+                    self.logger.info(f"[V2.1] Products to be added to report: {[p.get('name', 'Unknown') for p in product_indicators.get('extracted_products', [])[:5]]}")
+                else:
+                    self.logger.warning(f"[V2.1] WARNING: No products extracted! Product indicators: {list(product_indicators.keys())}")
+                
                 report_builder.add_product_details(product_indicators)
                 
+                # Update policy_pages based on extracted products/solutions
+                # This ensures Policy Details shows Product/Solutions as found when extracted from nav
+                # even if there's no dedicated /products or /solutions landing page
+                extracted_products = product_indicators.get("extracted_products", [])
+                if extracted_products and not policy_pages.get("product", {}).get("found"):
+                    # Find the first product with a source URL
+                    first_product_url = None
+                    for prod in extracted_products:
+                        if prod.get("source") == "navigation":
+                            first_product_url = "Navigation menu (dropdown)"
+                            break
+                    
+                    policy_pages["product"] = {
+                        "found": True,
+                        "url": first_product_url or "Products extracted from navigation",
+                        "status": f"Products detected ({len(extracted_products)} found in navigation)",
+                        "detection_method": "product_extraction",
+                        "evidence": {
+                            "source_url": final_url,
+                            "triggering_rule": f"Product extraction from navigation menu",
+                            "evidence_snippet": f"Products: {', '.join([p.get('name', 'Unknown') for p in extracted_products[:3]])}",
+                            "confidence": 80.0
+                        }
+                    }
+                    self.logger.info(f"[V2.1] Updated policy_pages['product'] based on extracted products")
+                
+                # Check if any extracted products look like solutions/services
+                solution_keywords = ['service', 'solution', 'platform', 'api', 'integration', 'suite', 'consulting', 'professional']
+                solutions_found = [p for p in extracted_products if any(kw in p.get('name', '').lower() for kw in solution_keywords)]
+                if solutions_found and not policy_pages.get("solutions", {}).get("found"):
+                    policy_pages["solutions"] = {
+                        "found": True,
+                        "url": "Solutions extracted from navigation",
+                        "status": f"Solutions detected ({len(solutions_found)} found)",
+                        "detection_method": "product_extraction",
+                        "evidence": {
+                            "source_url": final_url,
+                            "triggering_rule": "Solution extraction from navigation menu",
+                            "evidence_snippet": f"Solutions: {', '.join([p.get('name', 'Unknown') for p in solutions_found[:3]])}",
+                            "confidence": 70.0
+                        }
+                    }
+                    self.logger.info(f"[V2.1] Updated policy_pages['solutions'] based on extracted solutions")
+                
+                # Re-add updated policy_details to report
+                report_builder.add_policy_details(policy_pages)
+                
+                # Content Risk Analysis - per-page with exact source URLs
+                # Build list of candidate pages to analyze with their URLs and text
+                pages_for_risk = []
+                # Home page
+                pages_for_risk.append({"url": final_url, "text": page_text})
+                # Product page
+                if prod_soup:
+                    pages_for_risk.append({"url": (page_graph.get_page_by_type('product').url if page_graph.get_page_by_type('product') else product_indicators['source_pages'].get('product_page')), "text": prod_soup.get_text(separator=' ', strip=True).lower()})
+                # Pricing page
+                if price_soup:
+                    pages_for_risk.append({"url": (page_graph.get_page_by_type('pricing').url if page_graph.get_page_by_type('pricing') else product_indicators['source_pages'].get('pricing_page')), "text": price_soup.get_text(separator=' ', strip=True).lower()})
+                # About page
+                if about_soup:
+                    about_url = policy_pages.get("about_us", {}).get("url") or (page_graph.get_page_by_type('about').url if page_graph.get_page_by_type('about') else None)
+                    pages_for_risk.append({"url": about_url, "text": about_soup.get_text(separator=' ', strip=True).lower()})
+                
+                # Also include policy pages if present in page graph (often contain prohibited lists)
+                for ptype in ['privacy_policy', 'terms_conditions', 'refund_policy', 'shipping_delivery']:
+                    p = page_graph.get_page_by_type(ptype)
+                    if p and p.status == 200 and p.html:
+                        try:
+                            p_text = p.get_soup().get_text(separator=' ', strip=True).lower()
+                        except Exception:
+                            p_text = p.html.lower()
+                        pages_for_risk.append({"url": p.url, "text": p_text})
+                
+                # First pass: collect occurrences to compute corroboration per (category, keyword)
+                occurrence_map = {}  # (cat, kw) -> set(urls)
+                page_level_findings = []  # store raw items to update later
+                
+                for entry in pages_for_risk:
+                    if not entry.get("text"):
+                        continue
+                    page_result = ContentAnalyzer.analyze_content_risk(
+                        entry["text"],
+                        page_url=entry.get("url"),
+                        multi_page_corroboration=False  # update later
+                    )
+                    # Track occurrences
+                    for item in page_result.get("restricted_keywords_found", []):
+                        key = (item["category"], item["keyword"])
+                        occurrence_map.setdefault(key, set()).add(item["evidence"]["source_url"])
+                        page_level_findings.append(item)
+                
+                # Second pass: update corroboration flags and build final list
+                final_restricted = []
+                for item in page_level_findings:
+                    key = (item["category"], item["keyword"])
+                    corroborated = len(occurrence_map.get(key, set())) > 1
+                    item["evidence"]["corroborated"] = corroborated
+                    # Upgrade severity if corroborated and category severe
+                    if corroborated and item["category"] in ['gambling', 'adult', 'child_pornography']:
+                        item["evidence"]["severity"] = "critical"
+                    final_restricted.append(item)
+                
+                # Dummy evidence aggregation across pages
+                dummy_detected = False
+                dummy_patterns = []
+                dummy_evidence = []
+                for entry in pages_for_risk:
+                    if not entry.get("text"):
+                        continue
+                    dummy_page_check = ContentAnalyzer.analyze_content_risk(
+                        entry["text"],
+                        page_url=entry.get("url"),
+                        multi_page_corroboration=False
+                    )
+                    if dummy_page_check.get("dummy_words_detected"):
+                        dummy_detected = True
+                        dummy_patterns.extend(dummy_page_check.get("dummy_words", []))
+                        dummy_evidence.extend(dummy_page_check.get("dummy_words_evidence", []))
+                
+                # Compute risk score similar to analyzer but based on final_restricted
+                risk_score = len(final_restricted) * 20 + (50 if dummy_detected else 0)
+                
+                # Build unified content risk output
+                content_risk = {
+                    "detection_method": "Rule-based content keyword detection (non-semantic)",
+                    "dummy_words_detected": dummy_detected,
+                    "dummy_words": list(set(dummy_patterns)),
+                    "dummy_words_evidence": dummy_evidence,
+                    "restricted_keywords_found": final_restricted,
+                    "risk_score": risk_score,
+                    "signal_type": "advisory"
+                }
+                report_builder.add_content_risk(content_risk)
+                
                 # MCC Classification
-                mcc_data = self._classify_mcc(page_text)
+                # Per PRD V2.1.1: Collect page URLs for evidence
+                mcc_page_urls = [final_url]  # Start with home page
+                for page_type in ['product', 'pricing', 'about']:
+                    page = page_graph.get_page_by_type(page_type)
+                    if page and page.status == 200:
+                        mcc_page_urls.append(page.url)
+                
+                # Per PRD V2.1.1: Pass pages_scanned count for transparency
+                pages_scanned_count = len(page_graph.pages) if page_graph else 0
+                mcc_data = self._classify_mcc(page_text, page_urls=mcc_page_urls, pages_scanned=pages_scanned_count)
                 report_builder.add_mcc_codes(mcc_data)
                 
                 # Phase E.1: Business Context Classification
@@ -485,6 +1205,11 @@ class ModularScanEngine:
             # Build final report
             final_report = report_builder.build()
             
+            # Add crawl summary to report (PRD V2.1.1 requirement)
+            if "comprehensive_site_scan" in final_report:
+                crawl_summary = page_graph.get_crawl_summary()
+                final_report["comprehensive_site_scan"]["crawl_summary"] = crawl_summary
+            
             # Run Change Detection Comparison
             # We need to construct a 'virtual' current snapshot for comparison logic from the report data
             # Or we can just reuse the save_snapshot logic logic which extracts from report
@@ -509,7 +1234,12 @@ class ModularScanEngine:
                 }
             }
             
-            change_report = self.change_detector.compare(current_snapshot_data, previous_snapshot)
+            # Per PRD V2.1.1: Pass current scan timestamp for comparison metadata
+            change_report = self.change_detector.compare(
+                current_snapshot_data, 
+                previous_snapshot,
+                current_scan_timestamp=scan_start_timestamp
+            )
             
             # Add change detection to final report
             # Wrapping it inside comprehensive_site_scan to keep structure clean
@@ -520,12 +1250,24 @@ class ModularScanEngine:
                 intelligence_report = self.intelligence_engine.analyze_intelligence(change_report)
                 final_report["comprehensive_site_scan"]["change_intelligence"] = intelligence_report
             
-            # Phase 12: Snapshot / Persistence
-            snapshot_start_time = time.monotonic()
-            self.logger.info(f"[SCAN][{scan_id}][SNAPSHOT] Saving snapshot...")
-            self.change_detector.save_snapshot(task_id, url, page_graph, final_report)
-            snapshot_duration = time.monotonic() - snapshot_start_time
-            self.logger.info(f"[SCAN][{scan_id}][SNAPSHOT] Snapshot saved in {snapshot_duration:.2f}s")
+            # Phase 12: Snapshot / Persistence (Non-blocking)
+            self.logger.info(f"[SCAN][{scan_id}][SNAPSHOT] Starting background snapshot save...")
+            
+            def save_snapshot_background():
+                """Save snapshot in background thread"""
+                snapshot_start = time.monotonic()
+                try:
+                    self.change_detector.save_snapshot(task_id, url, page_graph, final_report)
+                    snapshot_duration = time.monotonic() - snapshot_start
+                    self.logger.info(f"[SCAN][{scan_id}][SNAPSHOT] Background snapshot saved in {snapshot_duration:.2f}s")
+                except Exception as e:
+                    snapshot_duration = time.monotonic() - snapshot_start
+                    self.logger.error(f"[SCAN][{scan_id}][SNAPSHOT] Background snapshot save failed after {snapshot_duration:.2f}s: {e}", exc_info=True)
+            
+            # Start snapshot save in background thread (non-blocking)
+            snapshot_thread = threading.Thread(target=save_snapshot_background, daemon=True)
+            snapshot_thread.start()
+            self.logger.info(f"[SCAN][{scan_id}][SNAPSHOT] Snapshot save started in background (non-blocking)")
             
             # Phase 10: Post-Crawl Analysis End
             post_crawl_duration = time.monotonic() - post_crawl_start_time
@@ -591,12 +1333,15 @@ class ModularScanEngine:
             })
     
     def _check_domain_age(self, domain, compliance_data):
-        """Check domain age via RDAP (more reliable/faster than WHOIS)"""
+        """Check domain age via RDAP (more reliable/faster than WHOIS)
+        Also returns rich RDAP details for reporting."""
         try:
             # RDAP lookups often fail with www prefix, so strip it
             clean_domain = domain.lower()
             if clean_domain.startswith('www.'):
                 clean_domain = clean_domain[4:]
+            # Extract TLD for fallback resolution
+            tld = clean_domain.split('.')[-1] if '.' in clean_domain else clean_domain
                 
             self.logger.info(f"[V2] Checking RDAP for domain: {clean_domain}")
             
@@ -604,50 +1349,167 @@ class ModularScanEngine:
             rdap_url = f"https://rdap.org/domain/{clean_domain}"
             response = requests.get(rdap_url, timeout=5)
             
-            # 2. Fallback for .com/.net if generic fails (often more reliable)
-            if response.status_code != 200 and (clean_domain.endswith('.com') or clean_domain.endswith('.net')):
-                self.logger.info(f"[V2] Generic RDAP failed, trying Verisign fallback...")
-                rdap_url = f"https://rdap.verisign.com/com/v1/domain/{clean_domain}" if clean_domain.endswith('.com') else f"https://rdap.verisign.com/net/v1/domain/{clean_domain}"
+            # 2. Fallback resolution
+            if response.status_code != 200:
+                candidate_urls = []
+                # Verisign for .com/.net
+                if tld in ('com', 'net'):
+                    candidate_urls.append(f"https://rdap.verisign.com/{tld}/v1/domain/{clean_domain}")
+                # IANA bootstrap mapping (broad coverage)
                 try:
-                    response = requests.get(rdap_url, timeout=5)
+                    iana_bootstrap = requests.get("https://data.iana.org/rdap/dns.json", timeout=5)
+                    if iana_bootstrap.status_code == 200:
+                        data = iana_bootstrap.json()
+                        for service in data.get('services', []):
+                            tlds, urls = service
+                            if tld in tlds:
+                                for base in urls:
+                                    base = base.rstrip('/')
+                                    # Ensure '/domain/' path exists
+                                    if not base.endswith('/domain'):
+                                        candidate_urls.append(f"{base}/domain/{clean_domain}")
+                                    else:
+                                        candidate_urls.append(f"{base}/{clean_domain}")
+                                break
+                except Exception as e:
+                    self.logger.debug(f"[V2] IANA RDAP bootstrap fetch failed: {e}")
+                
+                # Curated registry fallbacks (common modern TLD registries)
+                curated_bases = [
+                    "https://rdap.identitydigital.services/rdap",   # Identity Digital (Donuts)
+                    "https://rdap.donuts.co/rdap",                  # Legacy Donuts
+                    "https://rdap.centralnic.com",                  # CentralNic
+                    "https://rdap.publicinterestregistry.net/rdap", # PIR (.org)
+                    "https://rdap.dot.google/rdap",                 # Google Registry (.app, .dev, ...)
+                ]
+                for base in curated_bases:
+                    base = base.rstrip('/')
+                    candidate_urls.append(f"{base}/domain/{clean_domain}")
+                
+                # Deduplicate while preserving order
+                seen = set()
+                candidate_urls = [u for u in candidate_urls if not (u in seen or seen.add(u))]
+                
+                # Try candidates in order
+                try:
+                    for cand in candidate_urls:
+                        resp = requests.get(cand, timeout=5)
+                        if resp.status_code == 200:
+                            response = resp
+                            rdap_url = cand
+                            break
                 except Exception:
-                    pass # Keep original response if fallback errors out
+                    pass
 
             if response.status_code == 200:
                 data = response.json()
                 events = data.get('events', [])
                 creation_date_str = None
+                updated_date_str = None
+                expires_date_str = None
                 
-                # Find registration/creation event
+                # Find registration/creation/expiration events
                 for event in events:
-                    if event.get('eventAction') in ['registration', 'creation', 'last changed']:
+                    action = event.get('eventAction')
+                    if action in ['registration', 'creation'] and not creation_date_str:
                         creation_date_str = event.get('eventDate')
-                        if event.get('eventAction') == 'registration':
-                            break # Prefer registration date
+                    if action in ['last changed', 'last update', 'update'] and not updated_date_str:
+                        updated_date_str = event.get('eventDate')
+                    if action in ['expiration', 'expire', 'expiry'] and not expires_date_str:
+                        expires_date_str = event.get('eventDate')
                 
-                if creation_date_str:
-                    # Parse ISO format (e.g., 2020-05-15T10:00:00Z)
-                    creation_date_str = creation_date_str.replace('Z', '+00:00')
-                    creation_date = datetime.fromisoformat(creation_date_str)
-                    
-                    if creation_date.tzinfo:
-                        now = datetime.now(creation_date.tzinfo)
-                    else:
-                        now = datetime.now()
-                    
+                def _parse_iso(d):
+                    if not d:
+                        return None
+                    try:
+                        d = d.replace('Z', '+00:00')
+                        return datetime.fromisoformat(d)
+                    except Exception:
+                        return None
+                
+                creation_date = _parse_iso(creation_date_str)
+                updated_date = _parse_iso(updated_date_str)
+                expires_date = _parse_iso(expires_date_str)
+                
+                # Registrar info
+                registrar_name = None
+                registrar_iana_id = None
+                registrar_rdap = None
+                entities = data.get('entities', []) or []
+                for ent in entities:
+                    roles = ent.get('roles', [])
+                    if roles and any(r.lower() == 'registrar' for r in roles):
+                        # vCard
+                        vcard = ent.get('vcardArray', [])
+                        try:
+                            if isinstance(vcard, list) and len(vcard) >= 2:
+                                for item in vcard[1]:
+                                    if item and item[0] == 'fn' and len(item) >= 3:
+                                        registrar_name = item[3]
+                                    if item and item[0] == 'version':
+                                        continue
+                        except Exception:
+                            pass
+                        # Public IDs
+                        public_ids = ent.get('publicIds', [])
+                        if public_ids:
+                            for pid in public_ids:
+                                if pid.get('type', '').lower() == 'iana registrar id':
+                                    registrar_iana_id = pid.get('identifier')
+                                    break
+                        # Links
+                        links = ent.get('links', [])
+                        if links:
+                            registrar_rdap = links[0].get('href')
+                        break
+                
+                # Nameservers
+                nameservers = []
+                for ns in data.get('nameservers', []) or []:
+                    ldh = ns.get('ldhName') or ns.get('objectClassName') or ''
+                    if ldh:
+                        nameservers.append(ldh)
+                
+                # Status codes
+                status = data.get('status', []) or []
+                
+                # DNSSEC
+                secure_dns = data.get('secureDNS', {})
+                dnssec_enabled = bool(secure_dns) and (secure_dns.get('delegationSigned') or secure_dns.get('dsData') or secure_dns.get('keyData'))
+                
+                # Compute age
+                age_days = None
+                if creation_date:
+                    now = datetime.now(creation_date.tzinfo) if creation_date.tzinfo else datetime.now()
                     age_days = (now - creation_date).days
                     self.logger.info(f"[V2] Domain age: {age_days} days")
-                    
                     if age_days < 365:
                         compliance_data["general"]["alerts"].append({
                             "code": "LOW_VINTAGE",
                             "type": "Risk",
                             "description": f"Domain is only {age_days} days old (less than 1 year)."
                         })
-                    
-                    return age_days
                 else:
                     self.logger.warning("[V2] RDAP response missing creation date")
+                
+                # Build rich details
+                rdap_details = {
+                    "age_days": age_days,
+                    "created_on": creation_date_str,
+                    "updated_on": updated_date_str,
+                    "expires_on": expires_date_str,
+                    "registrar": {
+                        "name": registrar_name,
+                        "iana_id": registrar_iana_id,
+                        "rdap": registrar_rdap
+                    },
+                    "nameservers": nameservers[:10],
+                    "status": status,
+                    "dnssec": bool(dnssec_enabled),
+                    "rdap_source": rdap_url
+                }
+                
+                return rdap_details
             else:
                  self.logger.warning(f"[V2] RDAP lookup failed: {response.status_code}")
                  
@@ -655,7 +1517,18 @@ class ModularScanEngine:
             # Swallow error to prevent scan failure from blocking
             self.logger.warning(f"[V2] RDAP/Domain age check failed: {e}")
             
-        return None
+        # On failure, return minimal structure
+        return {
+            "age_days": None,
+            "created_on": None,
+            "updated_on": None,
+            "expires_on": None,
+            "registrar": None,
+            "nameservers": [],
+            "status": [],
+            "dnssec": None,
+            "rdap_source": None
+        }
     
     def _update_payment_compliance(self, policy_pages, page_text, compliance_data):
         """Update payment terms compliance based on policies"""
@@ -679,8 +1552,22 @@ class ModularScanEngine:
                     "description": "Shipping Policy is recommended for e-commerce sites."
                 })
     
-    def _classify_mcc(self, page_text):
-        """Classify MCC codes based on page content"""
+    def _classify_mcc(self, page_text, page_urls: List[str] = None, pages_scanned: int = 0):
+        """
+        Classify MCC codes based on page content.
+        Per PRD V2.1.1: Enforce minimum confidence threshold (30%), show evidence, keep advisory.
+        Must show: confidence %, keywords matched, pages contributing, pages scanned vs matched.
+        
+        Args:
+            page_text: Combined page text for keyword matching
+            page_urls: List of page URLs where keywords were found (for evidence)
+            pages_scanned: Total number of pages scanned (for transparency)
+        """
+        from analyzers.evidence_builder import EvidenceBuilder
+        from analyzers.signal_classifier import SignalClassifier
+        
+        # Per PRD: Minimum confidence threshold
+        MIN_CONFIDENCE_THRESHOLD = 30.0
         # Comprehensive MCC Database with Categories
         mcc_database = {
             "Retail": {
@@ -763,8 +1650,70 @@ class ModularScanEngine:
         # Sort by confidence
         matched_mccs.sort(key=lambda x: x["confidence"], reverse=True)
         
+        # Per PRD V2.1.1: Enforce minimum confidence threshold for Primary MCC
+        primary_mcc = None
+        secondary_mcc = None
+        all_matches = matched_mccs[:10]  # Top 10 matches
+        
+        if matched_mccs:
+            primary = matched_mccs[0]
+            if primary["confidence"] >= MIN_CONFIDENCE_THRESHOLD:
+                primary_mcc = primary
+                # Add evidence per PRD
+                primary_mcc["evidence"] = EvidenceBuilder.build_mcc_evidence(
+                    matched_keywords=primary.get("keywords_matched", []),
+                    pages_matched=page_urls or ["unknown"],
+                    confidence=primary["confidence"]
+                )
+                primary_mcc["signal_type"] = SignalClassifier.classify_signal("mcc_classification")
+            else:
+                # Below threshold - mark as low confidence
+                primary_mcc = {
+                    **primary,
+                    "confidence": primary["confidence"],
+                    "low_confidence": True,
+                    "status": "Low confidence classification (below 30% threshold)",
+                    "evidence": EvidenceBuilder.build_mcc_evidence(
+                        matched_keywords=primary.get("keywords_matched", []),
+                        pages_matched=page_urls or ["unknown"],
+                        confidence=primary["confidence"]
+                    ),
+                    "signal_type": SignalClassifier.classify_signal("mcc_classification")
+                }
+            
+            # Secondary MCC (if available and above threshold)
+            if len(matched_mccs) > 1:
+                secondary = matched_mccs[1]
+                if secondary["confidence"] >= MIN_CONFIDENCE_THRESHOLD:
+                    secondary_mcc = secondary
+                    secondary_mcc["evidence"] = EvidenceBuilder.build_mcc_evidence(
+                        matched_keywords=secondary.get("keywords_matched", []),
+                        pages_matched=page_urls or ["unknown"],
+                        confidence=secondary["confidence"]
+                    )
+        
+        # Add evidence to all matches
+        for match in all_matches:
+            if "evidence" not in match:
+                match["evidence"] = EvidenceBuilder.build_mcc_evidence(
+                    matched_keywords=match.get("keywords_matched", []),
+                    pages_matched=page_urls or ["unknown"],
+                    confidence=match["confidence"]
+                )
+            match["signal_type"] = SignalClassifier.classify_signal("mcc_classification")
+        
+        # Per PRD V2.1.1: Show pages contributing and pages scanned vs matched
+        pages_matched_count = len(page_urls) if page_urls else 0
+        
         return {
-            "primary_mcc": matched_mccs[0] if matched_mccs else None,
-            "secondary_mcc": matched_mccs[1] if len(matched_mccs) > 1 else None,
-            "all_matches": matched_mccs[:10]  # Top 10 matches
+            "primary_mcc": primary_mcc,
+            "secondary_mcc": secondary_mcc,
+            "all_matches": all_matches,
+            "signal_type": SignalClassifier.classify_signal("mcc_classification"),  # Per PRD: Advisory
+            "min_confidence_threshold": MIN_CONFIDENCE_THRESHOLD,
+            # Per PRD V2.1.1: Transparency metrics
+            "pages_scanned": pages_scanned,
+            "pages_matched": pages_matched_count,
+            "pages_contributing": page_urls or [],  # List of page URLs that contributed to classification
+            "classification_method": "Keyword-based dictionary matching"
         }

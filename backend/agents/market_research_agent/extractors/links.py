@@ -27,7 +27,19 @@ class LinkExtractor:
         
         for a in soup.find_all('a', href=True):
             href = a['href']
+            
+            # Skip invalid link types that can't be fetched
+            if href.startswith('#') or href.startswith('javascript:') or \
+               href.startswith('mailto:') or href.startswith('tel:') or \
+               href.startswith('data:') or not href.strip():
+                continue
+            
             full_url = urljoin(base_url, href)
+            
+            # Skip if urljoin produced an invalid URL (e.g., javascript:void(0) stays as-is)
+            if not full_url.startswith(('http://', 'https://')):
+                continue
+            
             link_text = a.get_text(strip=True).lower()
             
             all_links.append({

@@ -256,6 +256,7 @@ Examples:
                 error=f"Invalid JSON input: {str(e)}"
             )
             print(json.dumps(error_result))
+            sys.stdout.flush()
             sys.exit(1)
         
         # Extract action
@@ -266,6 +267,7 @@ Examples:
                 error="Missing required field: 'action'"
             )
             print(json.dumps(error_result))
+            sys.stdout.flush()
             sys.exit(1)
         
         logger.info(f"Received action: {action}")
@@ -278,18 +280,25 @@ Examples:
                 output={"dry_run": True, "action": action, "input": input_data}
             )
             print(json.dumps(result, indent=2))
+            sys.stdout.flush()
             sys.exit(0)
         
         # Execute agent
         result = run_agent(action, input_data)
         
         # Output result as JSON to stdout
-        print(json.dumps(result, indent=2, default=str))
+        output_json = json.dumps(result, indent=2, default=str)
+        print(output_json)
         
-        # Exit with appropriate code
-        if result.get("status") == "failed":
-            sys.exit(1)
-        sys.exit(0)
+        # CRITICAL: Flush stdout before os._exit() to ensure output is captured
+        # os._exit() bypasses Python cleanup, including stdout buffering
+        sys.stdout.flush()
+        
+        # Force immediate exit to prevent hanging
+        # Use os._exit() instead of sys.exit() to bypass Python cleanup that might delay exit
+        # This ensures the process exits immediately after completing the scan
+        exit_code = 1 if result.get("status") == "failed" else 0
+        os._exit(exit_code)
         
     except Exception as e:
         logger.error(f"CLI execution failed: {e}", exc_info=True)
@@ -298,6 +307,7 @@ Examples:
             error=str(e)
         )
         print(json.dumps(error_result))
+        sys.stdout.flush()
         sys.exit(1)
 
 

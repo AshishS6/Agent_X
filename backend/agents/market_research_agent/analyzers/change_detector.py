@@ -1,6 +1,7 @@
 """
 Change Detector Module
-Compare current scan results with previous snapshots
+Compare current scan results with previous snapshots.
+Per PRD V2.1.1: Each change must specify what changed, where (page), why it matters (classification).
 """
 
 import logging
@@ -8,6 +9,8 @@ import json
 from typing import Dict, Any, Optional, List
 from psycopg2.extras import Json
 from shared.db_utils import get_db_connection
+from analyzers.evidence_builder import EvidenceBuilder
+from analyzers.signal_classifier import SignalClassifier
 
 class ChangeDetector:
     """
@@ -46,16 +49,28 @@ class ChangeDetector:
             self.logger.warning(f"Failed to fetch previous snapshot: {e}")
         return None
 
-    def compare(self, current_snapshot: Dict[str, Any], previous_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, current_snapshot: Dict[str, Any], previous_snapshot: Dict[str, Any], current_scan_timestamp: Optional[str] = None) -> Dict[str, Any]:
         """
         Compare two snapshots and return a change report.
+        Per PRD V2.1.1: Add comparison metadata showing what was checked, even if nothing changed.
+        
+        Args:
+            current_snapshot: Current scan snapshot data
+            previous_snapshot: Previous scan snapshot data
+            current_scan_timestamp: Timestamp of current scan (ISO format)
         """
         if not previous_snapshot:
             return {
                 "since_last_scan": False,
                 "summary": "First scan detected.",
                 "changes": [],
-                "snapshot_id": None
+                "snapshot_id": None,
+                # Per PRD V2.1.1: Show what was checked even if no previous scan
+                "comparison_metadata": {
+                    "compared_against": None,
+                    "signals_monitored": ["content_hash", "pricing_model", "product_indicators"],
+                    "current_scan_timestamp": current_scan_timestamp
+                }
             }
             
         changes = []
@@ -67,10 +82,28 @@ class ChangeDetector:
         for page_type, curr_hash in current_hashes.items():
             prev_hash = prev_hashes.get(page_type)
             if prev_hash and curr_hash != prev_hash:
+                # Per PRD V2.1.1: Add evidence (what changed, where, why it matters)
+                page_url = f"Page type: {page_type}"  # We don't have URL here, use page type
+                change_description = f"{page_type.replace('_', ' ').title()} page content has changed."
+                severity = "moderate" if page_type in ['product', 'pricing'] else "minor"
+                classification = "Content modification detected via hash comparison"
+                
+                evidence = EvidenceBuilder.build_change_evidence(
+                    page_url=page_url,
+                    change_type="content_change",
+                    change_description=change_description,
+                    classification=severity
+                )
+                
                 changes.append({
                     "type": "content_change",
-                    "severity": "moderate" if page_type in ['product', 'pricing'] else "minor",
-                    "description": f"{page_type.replace('_', ' ').title()} page content has changed."
+                    "severity": severity,
+                    "description": change_description,
+                    "what_changed": f"Content hash changed for {page_type} page",
+                    "where": page_type,
+                    "why_it_matters": classification,
+                    "evidence": evidence,
+                    "signal_type": SignalClassifier.classify_signal("change_detection")
                 })
         
         # 2. Check Derived Signal Changes
@@ -79,28 +112,73 @@ class ChangeDetector:
         
         # Pricing Model Change
         if current_signals.get('pricing_model') != prev_signals.get('pricing_model'):
-             changes.append({
+            prev_model = prev_signals.get('pricing_model') or 'Unknown'
+            curr_model = current_signals.get('pricing_model') or 'Unknown'
+            change_description = f"Pricing model changed from {prev_model} to {curr_model}."
+            
+            evidence = EvidenceBuilder.build_change_evidence(
+                page_url="Pricing page",
+                change_type="pricing_change",
+                change_description=change_description,
+                classification="critical"
+            )
+            
+            changes.append({
                 "type": "pricing_change",
                 "severity": "critical",
-                "description": f"Pricing model changed from {prev_signals.get('pricing_model')} to {current_signals.get('pricing_model')}."
+                "description": change_description,
+                "what_changed": f"Pricing model: {prev_model} → {curr_model}",
+                "where": "pricing",
+                "why_it_matters": "Pricing model changes may affect merchant category or compliance requirements",
+                "evidence": evidence,
+                "signal_type": SignalClassifier.classify_signal("change_detection")
             })
             
         # Product Count Change
         curr_prod_count = len(current_signals.get('extracted_products', []))
         prev_prod_count = len(prev_signals.get('extracted_products', []))
         if abs(curr_prod_count - prev_prod_count) >= 1:
-             changes.append({
+            change_description = f"Number of detected products changed from {prev_prod_count} to {curr_prod_count}."
+            
+            evidence = EvidenceBuilder.build_change_evidence(
+                page_url="Product pages",
+                change_type="product_change",
+                change_description=change_description,
+                classification="moderate"
+            )
+            
+            changes.append({
                 "type": "product_change",
                 "severity": "moderate",
-                "description": f"Number of detected products changed from {prev_prod_count} to {curr_prod_count}."
+                "description": change_description,
+                "what_changed": f"Product count: {prev_prod_count} → {curr_prod_count}",
+                "where": "product",
+                "why_it_matters": "Product catalog changes may indicate business model shifts",
+                "evidence": evidence,
+                "signal_type": SignalClassifier.classify_signal("change_detection")
             })
 
+        # Per PRD V2.1.1: Add comparison metadata showing what was checked
+        comparison_metadata = {
+            "compared_against": previous_snapshot['scan_timestamp'].isoformat() if previous_snapshot.get('scan_timestamp') else None,
+            "current_scan_timestamp": current_scan_timestamp,
+            "signals_monitored": [
+                "content_hash (home, privacy_policy, terms_conditions, product, pricing pages)",
+                "pricing_model (derived signal)",
+                "extracted_products (derived signal)"
+            ],
+            "pages_compared": list(current_snapshot.get('page_hashes', {}).keys()),
+            "comparison_method": "Content hash comparison and derived signal analysis"
+        }
+        
         return {
             "since_last_scan": True,
-            "last_scan_date": previous_snapshot['scan_timestamp'].isoformat(),
+            "last_scan_date": previous_snapshot['scan_timestamp'].isoformat() if previous_snapshot.get('scan_timestamp') else None,
             "summary": f"{len(changes)} changes detected." if changes else "No significant changes detected.",
             "changes": changes,
-            "snapshot_id": previous_snapshot['id']
+            "snapshot_id": previous_snapshot['id'],
+            # Per PRD V2.1.1: Reviewer understands what was checked, even if nothing changed
+            "comparison_metadata": comparison_metadata
         }
 
     def save_snapshot(self, task_id: str, target_url: str, page_graph: Any, report: Dict[str, Any]):

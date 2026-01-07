@@ -221,9 +221,16 @@ class ChangeIntelligenceEngine:
             intelligence = self.CHANGE_RULES[c_type].copy()
 
         # Merge intelligence into change object (preserving original fields, intelligence overwrites conflicts if any)
+        # Per PRD V2.1.1: Preserve evidence fields (what_changed, where, why_it_matters, evidence)
         # We want the output to be the original change + new fields
         enriched = change.copy()
         enriched.update(intelligence)
+        
+        # Ensure evidence fields are preserved (from ChangeDetector)
+        evidence_fields = ["what_changed", "where", "why_it_matters", "evidence", "signal_type"]
+        for field in evidence_fields:
+            if field in change and field not in enriched:
+                enriched[field] = change[field]
         
         return enriched
 
