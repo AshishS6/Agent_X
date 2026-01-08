@@ -106,6 +106,8 @@ class PageClassifier:
             'url_patterns': [
                 (r'privacy[-_]?policy', 1.0),
                 (r'/privacy/?$', 0.9),
+                (r'/legal/privacy', 0.95),  # Nested under /legal/
+                (r'/legal.*privacy', 0.85),  # Any privacy under legal
                 (r'gdpr', 0.8),
                 (r'data[-_]?protection', 0.8),
             ],
@@ -121,6 +123,9 @@ class PageClassifier:
                 (r'terms[-_]?of[-_]?(service|use)', 1.0),
                 (r'/terms/?$', 0.9),
                 (r'/tos/?$', 0.9),
+                (r'/legal/terms', 0.95),  # Nested under /legal/
+                (r'/legal/tos', 0.95),    # TOS under /legal/
+                (r'/legal.*terms', 0.85),  # Any terms under legal
                 (r't-?and-?c', 0.8),
             ],
             'text_patterns': [
@@ -241,6 +246,18 @@ class PageClassifier:
                 (r'faq', 1.0),
                 (r'frequently\s*asked', 0.9),
                 (r'questions', 0.4),
+            ]
+        },
+        'legal_hub': {
+            'url_patterns': [
+                (r'/legal/?$', 1.0),        # Exact /legal/
+                (r'/legal-?hub/?$', 0.9),   # /legal-hub/
+                (r'/policies/?$', 0.9),     # /policies/
+            ],
+            'text_patterns': [
+                (r'^legal$', 1.0),
+                (r'legal\s*information', 0.9),
+                (r'policies', 0.7),
             ]
         },
         'docs': {

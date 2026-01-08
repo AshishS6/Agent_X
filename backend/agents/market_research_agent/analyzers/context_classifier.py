@@ -135,7 +135,16 @@ class BusinessContextClassifier:
         if tech.get('analytics'): scores[self.CONTEXT_SAAS] += 0.5
         
         # --- Fintech Signals ---
-        if hits.get('fintech'): scores[self.CONTEXT_FINTECH] += len(hits['fintech']) * 0.5
+        if hits.get('fintech'): 
+            # More generous scoring - payment gateways have many fintech keywords
+            num_hits = len(hits['fintech'])
+            scores[self.CONTEXT_FINTECH] += min(num_hits * 1.0, 8)  # Cap at 8 points
+            # Extra boost for payment-specific keywords (strong signal)
+            payment_keywords = {'payment gateway', 'payment processing', 'payment api', 'merchant', 
+                              'payout', 'settlement', 'pci', 'razorpay', 'stripe', 'upi', 'netbanking'}
+            payment_hits = len([k for k in hits['fintech'] if any(pk in k for pk in payment_keywords)])
+            if payment_hits >= 2:
+                scores[self.CONTEXT_FINTECH] += 3  # Strong fintech signal
         if evidence['mcc'].get('description') and 'financial' in evidence['mcc']['description'].lower():
             scores[self.CONTEXT_FINTECH] += 4
         

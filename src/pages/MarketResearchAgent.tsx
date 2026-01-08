@@ -1093,48 +1093,76 @@ const MarketResearchAgent = () => {
                                                                         </div>
                                                                     )}
                                                                     
-                                                                    {/* Domain Age Summary (full RDAP details in Summary tab) */}
-                                                                    {lowVintageAlert && (
-                                                                        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mt-4">
-                                                                            <div className="flex items-center gap-2 text-yellow-400 mb-2">
-                                                                                <AlertTriangle size={18} />
-                                                                                <span className="font-semibold">Low Domain Vintage</span>
-                                                                            </div>
-                                                                            <div className="text-sm text-yellow-200">{lowVintageAlert.description}</div>
-                                                                            <div className="text-xs text-gray-400 mt-2">
-                                                                                See Crawl Summary tab for full RDAP details
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-
-                                                                    {/* Content Risk Section - PRD V2.1.1 */}
+                                                                    {/* Content Risk Section - PRD V2.1.1 with Intent Awareness */}
                                                                     {siteScan.content_risk && (
-                                                                        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-5 mt-4">
-                                                                            <h3 className="text-yellow-400 font-bold flex items-center gap-2 mb-3">
+                                                                        <div className={`rounded-lg p-5 mt-4 ${
+                                                                            siteScan.content_risk.risk_score >= 50 
+                                                                                ? 'bg-yellow-500/5 border border-yellow-500/20' 
+                                                                                : 'bg-gray-800/30 border border-gray-700/30'
+                                                                        }`}>
+                                                                            <h3 className={`font-bold flex items-center gap-2 mb-3 ${
+                                                                                siteScan.content_risk.risk_score >= 50 ? 'text-yellow-400' : 'text-gray-300'
+                                                                            }`}>
                                                                                 <AlertTriangle size={20} />
                                                                                 Content Risk Detection
-                                                                                <span className="text-xs text-yellow-300 ml-2">(Rule-based, non-semantic)</span>
+                                                                                <span className="text-xs text-gray-400 ml-2">(Rule-based, non-semantic)</span>
+                                                                                {siteScan.content_risk.policy_mentions_count > 0 && (
+                                                                                    <span className="text-xs text-green-400 ml-2 bg-green-500/10 px-2 py-0.5 rounded">
+                                                                                        {siteScan.content_risk.policy_mentions_count} policy mention(s) excluded
+                                                                                    </span>
+                                                                                )}
                                                                             </h3>
                                                                             {siteScan.content_risk.detection_method && (
                                                                                 <p className="text-xs text-gray-400 mb-3">{siteScan.content_risk.detection_method}</p>
                                                                             )}
                                                                             {siteScan.content_risk.restricted_keywords_found && siteScan.content_risk.restricted_keywords_found.length > 0 && (
                                                                                 <div className="space-y-2">
-                                                                                    {siteScan.content_risk.restricted_keywords_found.map((risk: any, idx: number) => (
-                                                                                        <div key={idx} className="bg-black/30 border border-yellow-500/30 rounded p-3">
-                                                                                            <div className="flex justify-between items-start mb-2">
-                                                                                                <span className="text-xs font-bold text-yellow-300 uppercase">{risk.category}</span>
-                                                                                                <span className="text-xs text-gray-400">{risk.evidence?.severity || 'moderate'}</span>
-                                                                                            </div>
-                                                                                            <p className="text-sm text-gray-300 mb-2">Keyword: {risk.keyword}</p>
-                                                                                            {risk.evidence && (
-                                                                                                <div className="text-xs text-gray-500 space-y-1">
-                                                                                                    <div>Source: <a href={risk.evidence.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{risk.evidence.source_url}</a></div>
-                                                                                                    <div>Snippet: {risk.evidence.evidence_snippet}</div>
+                                                                                    {siteScan.content_risk.restricted_keywords_found.slice(0, 5).map((risk: any, idx: number) => {
+                                                                                        const isProhibitive = risk.intent === 'prohibitive' && 
+                                                                                            ['privacy_policy', 'terms_conditions', 'terms_condition', 'refund_policy'].includes(risk.page_type);
+                                                                                        return (
+                                                                                            <div key={idx} className={`rounded p-3 ${
+                                                                                                isProhibitive 
+                                                                                                    ? 'bg-green-500/10 border border-green-500/30' 
+                                                                                                    : 'bg-black/30 border border-yellow-500/30'
+                                                                                            }`}>
+                                                                                                <div className="flex justify-between items-start mb-2">
+                                                                                                    <div className="flex items-center gap-2">
+                                                                                                        <span className={`text-xs font-bold uppercase ${
+                                                                                                            isProhibitive ? 'text-green-300' : 'text-yellow-300'
+                                                                                                        }`}>{risk.category}</span>
+                                                                                                        {risk.page_type && (
+                                                                                                            <span className="text-xs text-gray-500 bg-black/30 px-1.5 py-0.5 rounded">
+                                                                                                                {risk.page_type.replace(/_/g, ' ')}
+                                                                                                            </span>
+                                                                                                        )}
+                                                                                                    </div>
+                                                                                                    <span className={`text-xs ${
+                                                                                                        isProhibitive ? 'text-green-400' : 'text-gray-400'
+                                                                                                    }`}>
+                                                                                                        {isProhibitive ? 'prohibitive (no penalty)' : risk.evidence?.severity || 'moderate'}
+                                                                                                    </span>
                                                                                                 </div>
-                                                                                            )}
-                                                                                        </div>
-                                                                                    ))}
+                                                                                                <p className="text-sm text-gray-300 mb-2">Keyword: {risk.keyword}</p>
+                                                                                                {risk.intent_context && isProhibitive && (
+                                                                                                    <div className="text-xs text-green-400/80 bg-green-500/5 p-2 rounded mb-2 font-mono">
+                                                                                                        "{risk.intent_context}"
+                                                                                                    </div>
+                                                                                                )}
+                                                                                                {risk.evidence && !isProhibitive && (
+                                                                                                    <div className="text-xs text-gray-500 space-y-1">
+                                                                                                        <div>Source: <a href={risk.evidence.source_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{risk.evidence.source_url}</a></div>
+                                                                                                        <div>Snippet: {risk.evidence.evidence_snippet?.substring(0, 100)}...</div>
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        );
+                                                                                    })}
+                                                                                    {siteScan.content_risk.restricted_keywords_found.length > 5 && (
+                                                                                        <p className="text-xs text-gray-500 text-center mt-2">
+                                                                                            + {siteScan.content_risk.restricted_keywords_found.length - 5} more keywords (see Content Risk tab)
+                                                                                        </p>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                             {siteScan.content_risk.dummy_words_detected && (
@@ -1807,7 +1835,12 @@ const MarketResearchAgent = () => {
                                                                             {siteScan.content_risk.risk_score}
                                                                         </div>
                                                                         <div className="text-sm text-gray-400 mt-1">
-                                                                            {siteScan.content_risk.restricted_keywords_found?.length || 0} keywords detected
+                                                                            {siteScan.content_risk.risk_contributing_count || siteScan.content_risk.restricted_keywords_found?.length || 0} risk keywords
+                                                                            {siteScan.content_risk.policy_mentions_count > 0 && (
+                                                                                <span className="text-green-400 ml-2">
+                                                                                    + {siteScan.content_risk.policy_mentions_count} policy mentions
+                                                                                </span>
+                                                                            )}
                                                                         </div>
                                                                     </div>
                                                                 </div>
@@ -1816,8 +1849,19 @@ const MarketResearchAgent = () => {
                                                                         ? 'High risk content detected. Multiple prohibited keywords found.' 
                                                                         : siteScan.content_risk.risk_score >= 50 
                                                                         ? 'Moderate risk content detected. Some restricted keywords found.' 
+                                                                        : siteScan.content_risk.policy_mentions_count > 0
+                                                                        ? 'Low risk. Keywords found in policy pages with prohibitive intent (legal boilerplate).'
                                                                         : 'Low risk. Minimal or no restricted content detected.'}
                                                                 </div>
+                                                                {siteScan.content_risk.policy_mentions_count > 0 && (
+                                                                    <div className="mt-3 p-3 bg-green-500/10 border border-green-500/30 rounded text-sm">
+                                                                        <span className="text-green-400 font-medium">Intent-Aware Detection:</span>
+                                                                        <span className="text-gray-300 ml-2">
+                                                                            {siteScan.content_risk.policy_mentions_count} keyword(s) found in prohibitive context 
+                                                                            (e.g., "we do not allow...") and excluded from risk score.
+                                                                        </span>
+                                                                    </div>
+                                                                )}
                                                             </div>
 
                                                             {/* Dummy Words Detection */}
@@ -1844,108 +1888,137 @@ const MarketResearchAgent = () => {
 
                                                             {/* Restricted Keywords by Category */}
                                                             {siteScan.content_risk.restricted_keywords_found && siteScan.content_risk.restricted_keywords_found.length > 0 ? (
-                                                                <div>
-                                                                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                                                                        <AlertOctagon className="text-red-400" size={20} />
-                                                                        Detected Restricted Keywords
-                                                                    </h3>
-                                                                    <div className="space-y-4">
-                                                                        {(() => {
-                                                                            // Group keywords by category
-                                                                            const grouped: { [key: string]: string[] } = {};
-                                                                            siteScan.content_risk.restricted_keywords_found.forEach((item: any) => {
-                                                                                if (!grouped[item.category]) {
-                                                                                    grouped[item.category] = [];
-                                                                                }
-                                                                                if (!grouped[item.category].includes(item.keyword)) {
-                                                                                    grouped[item.category].push(item.keyword);
-                                                                                }
-                                                                            });
+                                                                <div className="space-y-6">
+                                                                    {/* Risk Contributing Keywords Section */}
+                                                                    {(() => {
+                                                                        // Separate risk keywords from policy mentions
+                                                                        const riskKeywords = siteScan.content_risk.restricted_keywords_found.filter(
+                                                                            (item: any) => item.intent !== 'prohibitive' || 
+                                                                            !['privacy_policy', 'terms_conditions', 'terms_condition', 'refund_policy', 'returns_refund'].includes(item.page_type)
+                                                                        );
+                                                                        const policyMentions = siteScan.content_risk.restricted_keywords_found.filter(
+                                                                            (item: any) => item.intent === 'prohibitive' && 
+                                                                            ['privacy_policy', 'terms_conditions', 'terms_condition', 'refund_policy', 'returns_refund'].includes(item.page_type)
+                                                                        );
+                                                                        
+                                                                        return (
+                                                                            <>
+                                                                                {riskKeywords.length > 0 && (
+                                                                                    <div>
+                                                                                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                                                                            <AlertOctagon className="text-red-400" size={20} />
+                                                                                            Risk-Contributing Keywords
+                                                                                            <span className="text-xs text-gray-400 font-normal ml-2">({riskKeywords.length} detected)</span>
+                                                                                        </h3>
+                                                                                        <div className="space-y-4">
+                                                                                            {(() => {
+                                                                                                // Group keywords by category
+                                                                                                const grouped: { [key: string]: { keyword: string; page_type: string; intent: string }[] } = {};
+                                                                                                riskKeywords.forEach((item: any) => {
+                                                                                                    if (!grouped[item.category]) {
+                                                                                                        grouped[item.category] = [];
+                                                                                                    }
+                                                                                                    if (!grouped[item.category].some((k: any) => k.keyword === item.keyword)) {
+                                                                                                        grouped[item.category].push({ 
+                                                                                                            keyword: item.keyword, 
+                                                                                                            page_type: item.page_type,
+                                                                                                            intent: item.intent 
+                                                                                                        });
+                                                                                                    }
+                                                                                                });
 
-                                                                            // Category severity mapping
-                                                                            const categorySeverity: { [key: string]: { color: string; bg: string; border: string; label: string } } = {
-                                                                                'child_pornography': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Child Pornography' },
-                                                                                'adult': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Adult Content' },
-                                                                                'gambling': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Gambling' },
-                                                                                'weapons': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Weapons' },
-                                                                                'drugs': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Illegal Drugs' },
-                                                                                'pharmacy': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Prescription Drugs' },
-                                                                                'crypto': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Cryptocurrency' },
-                                                                                'forex': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Forex Trading' },
-                                                                                'binary': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Binary Options' },
-                                                                                'alcohol': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Alcohol' },
-                                                                                'tobacco': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Tobacco' },
-                                                                                'counterfeit': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Counterfeit Goods' },
-                                                                                'copyright': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Copyright Infringement' },
-                                                                                'hacking': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Hacking Tools' },
-                                                                                'government_ids': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Fake Government IDs' },
-                                                                                'body_parts': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Body Parts' },
-                                                                                'endangered_species': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Endangered Species' },
-                                                                                'pyrotechnics': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Pyrotechnics' },
-                                                                                'regulated_goods': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Regulated Goods' },
-                                                                                'securities': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Securities' },
-                                                                                'traffic_devices': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Traffic Devices' },
-                                                                                'wholesale_currency': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Wholesale Currency' },
-                                                                                'live_animals': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Live Animals' },
-                                                                                'mlm': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Multi-Level Marketing' },
-                                                                                'work_at_home': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Work at Home Schemes' },
-                                                                                'drop_shipped': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Drop-Shipped Merchandise' },
-                                                                                'money_transfer': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Money Transfer' },
-                                                                                'dating_escort': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Dating/Escort Services' },
-                                                                                'massage_parlors': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Massage Parlors' },
-                                                                                'detective_agencies': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Detective Agencies' },
-                                                                                'political': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Political Organizations' },
-                                                                                'bpo_kpo': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'BPO/KPO Services' },
-                                                                                'job_services': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Job Services' },
-                                                                                'real_estate': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Real Estate' },
-                                                                                'web_telephony': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Web Telephony' },
-                                                                                'auction': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Auction Services' },
-                                                                                'money_changer': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Money Changer' },
-                                                                                'offshore': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Offshore Corporation' },
-                                                                                'crowdsourcing': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Crowdsourcing' },
-                                                                                'antiques_art': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Antiques/Art' },
-                                                                                'gems_jewellery': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Gems/Jewellery' },
-                                                                                'embassies': { color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/30', label: 'Embassies' },
-                                                                                'business_correspondent': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Business Correspondent' },
-                                                                                'digital_lending': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Digital Lending' },
-                                                                                'gift_cards_forex': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Gift Cards (Forex)' },
-                                                                                'video_chatting': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Video Chatting' },
-                                                                                'spam': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Spam/Bulk Marketing' },
-                                                                                'miracle_cures': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Miracle Cures' },
-                                                                                'offensive_goods': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Offensive Goods' },
-                                                                                'illegal_goods': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Illegal Goods' },
-                                                                            };
+                                                                                                // Category severity mapping
+                                                                                                const categorySeverity: { [key: string]: { color: string; bg: string; border: string; label: string } } = {
+                                                                                                    'child_pornography': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Child Pornography' },
+                                                                                                    'adult': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Adult Content' },
+                                                                                                    'gambling': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Gambling' },
+                                                                                                    'weapons': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Weapons' },
+                                                                                                    'drugs': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Illegal Drugs' },
+                                                                                                    'pharmacy': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Prescription Drugs' },
+                                                                                                    'crypto': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Cryptocurrency' },
+                                                                                                    'forex': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Forex Trading' },
+                                                                                                    'binary': { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30', label: 'Binary Options' },
+                                                                                                    'alcohol': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Alcohol' },
+                                                                                                    'tobacco': { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', label: 'Tobacco' },
+                                                                                                    'counterfeit': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Counterfeit Goods' },
+                                                                                                    'copyright': { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', label: 'Copyright Infringement' },
+                                                                                                    'hacking': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Hacking Tools' },
+                                                                                                    'illegal_goods': { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', label: 'Illegal Goods' },
+                                                                                                };
 
-                                                                            return Object.entries(grouped).map(([category, keywords]) => {
-                                                                                const severity = categorySeverity[category] || { 
-                                                                                    color: 'text-gray-400', 
-                                                                                    bg: 'bg-gray-500/10', 
-                                                                                    border: 'border-gray-500/30', 
-                                                                                    label: category.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
-                                                                                };
-                                                                                return (
-                                                                                    <div key={category} className={`${severity.bg} ${severity.border} border rounded-lg p-5`}>
-                                                                                        <div className="flex items-center justify-between mb-3">
-                                                                                            <h4 className={`font-bold ${severity.color} flex items-center gap-2`}>
-                                                                                                <AlertOctagon size={18} />
-                                                                                                {severity.label}
-                                                                                            </h4>
-                                                                                            <span className="text-xs text-gray-400 bg-black/30 px-2 py-1 rounded">
-                                                                                                {keywords.length} {keywords.length === 1 ? 'keyword' : 'keywords'}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                        <div className="flex flex-wrap gap-2">
-                                                                                            {keywords.map((keyword, idx) => (
-                                                                                                <span key={idx} className="px-3 py-1.5 bg-black/30 text-gray-300 text-sm rounded border border-gray-700/50 font-mono">
-                                                                                                    {keyword}
-                                                                                                </span>
-                                                                                            ))}
+                                                                                                return Object.entries(grouped).map(([category, keywords]) => {
+                                                                                                    const severity = categorySeverity[category] || { 
+                                                                                                        color: 'text-gray-400', 
+                                                                                                        bg: 'bg-gray-500/10', 
+                                                                                                        border: 'border-gray-500/30', 
+                                                                                                        label: category.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())
+                                                                                                    };
+                                                                                                    return (
+                                                                                                        <div key={category} className={`${severity.bg} ${severity.border} border rounded-lg p-5`}>
+                                                                                                            <div className="flex items-center justify-between mb-3">
+                                                                                                                <h4 className={`font-bold ${severity.color} flex items-center gap-2`}>
+                                                                                                                    <AlertOctagon size={18} />
+                                                                                                                    {severity.label}
+                                                                                                                </h4>
+                                                                                                                <span className="text-xs text-gray-400 bg-black/30 px-2 py-1 rounded">
+                                                                                                                    {keywords.length} {keywords.length === 1 ? 'keyword' : 'keywords'}
+                                                                                                                </span>
+                                                                                                            </div>
+                                                                                                            <div className="flex flex-wrap gap-2">
+                                                                                                                {keywords.map((kw, idx) => (
+                                                                                                                    <span key={idx} className="px-3 py-1.5 bg-black/30 text-gray-300 text-sm rounded border border-gray-700/50 font-mono flex items-center gap-2">
+                                                                                                                        {kw.keyword}
+                                                                                                                        {kw.page_type && (
+                                                                                                                            <span className="text-xs text-gray-500">
+                                                                                                                                ({kw.page_type.replace(/_/g, ' ')})
+                                                                                                                            </span>
+                                                                                                                        )}
+                                                                                                                    </span>
+                                                                                                                ))}
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    );
+                                                                                                });
+                                                                                            })()}
                                                                                         </div>
                                                                                     </div>
-                                                                                );
-                                                                            });
-                                                                        })()}
-                                                                    </div>
+                                                                                )}
+
+                                                                                {/* Policy Mentions Section (Prohibitive Intent) */}
+                                                                                {policyMentions.length > 0 && (
+                                                                                    <div>
+                                                                                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                                                                            <CheckCircle className="text-green-400" size={20} />
+                                                                                            Policy Mentions (Prohibitive Intent)
+                                                                                            <span className="text-xs text-gray-400 font-normal ml-2">({policyMentions.length} - excluded from risk score)</span>
+                                                                                        </h3>
+                                                                                        <div className="bg-green-500/5 border border-green-500/20 rounded-lg p-5">
+                                                                                            <p className="text-sm text-gray-400 mb-4">
+                                                                                                These keywords were found on policy pages in prohibitive context 
+                                                                                                (e.g., "we do not allow gambling"). They indicate compliance awareness, not actual risk.
+                                                                                            </p>
+                                                                                            <div className="flex flex-wrap gap-2">
+                                                                                                {policyMentions.map((item: any, idx: number) => (
+                                                                                                    <span key={idx} className="px-3 py-1.5 bg-green-500/10 text-green-300 text-sm rounded border border-green-500/30 font-mono flex items-center gap-2">
+                                                                                                        <CheckCircle size={12} />
+                                                                                                        {item.keyword}
+                                                                                                        <span className="text-xs text-green-400/60">
+                                                                                                            ({item.page_type?.replace(/_/g, ' ') || 'policy'})
+                                                                                                        </span>
+                                                                                                    </span>
+                                                                                                ))}
+                                                                                            </div>
+                                                                                            {policyMentions[0]?.intent_context && (
+                                                                                                <div className="mt-3 p-3 bg-black/20 rounded text-xs text-gray-400 font-mono">
+                                                                                                    Example context: "{policyMentions[0].intent_context}"
+                                                                                                </div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )}
+                                                                            </>
+                                                                        );
+                                                                    })()}
                                                                 </div>
                                                             ) : (
                                                                 <div className="text-center p-12 bg-gray-800/30 rounded-lg border border-gray-700/50 border-dashed">

@@ -84,7 +84,20 @@ class EvidenceCollector:
             "developer_docs": ['api reference', 'sdk', 'documentation', 'developer guide', 'git clone', 'npm install'],
             "blockchain_specific": ['validator', 'consensus', 'tokenomics', 'smart contract', 'faucet', 'mainnet', 'testnet', 'rpc endpoint'],
             "blockchain_generic": ['blockchain', 'crypto', 'web3', 'decentralized', 'protocol'],
-            "fintech": ['banking', 'wealth management', 'insurance', 'loans', 'credit card', 'investing', 'brokerage'],
+            "fintech": [
+                # Banking & Finance
+                'banking', 'wealth management', 'insurance', 'loans', 'credit card', 'investing', 'brokerage',
+                # Payment Infrastructure - Critical for payment gateways like Razorpay/Stripe
+                'payment gateway', 'payment processing', 'payment api', 'payment solution', 'payment infrastructure',
+                'upi', 'netbanking', 'neft', 'rtgs', 'imps', 'emi', 'recurring payments', 'subscription billing',
+                'merchant', 'payout', 'settlement', 'refund', 'chargeback', 'pci dss', 'pci compliant',
+                'acquire', 'issuer', 'card processing', 'payment link', 'payment button', 'checkout api',
+                # Razorpay/Stripe specific patterns
+                'razorpay', 'stripe', 'paypal', 'paytm', 'phonepe', 'gpay', 'bharat qr',
+                'escrow', 'split payment', 'marketplace payout', 'instant settlement',
+                # Financial Services
+                'kyc', 'aml', 'compliance', 'forex', 'currency exchange', 'remittance', 'wire transfer'
+            ],
             "saas": ['dashboard', 'sign up', 'log in', 'pricing', 'subscription', 'software', 'platform'],
             "ecommerce": ['add to cart', 'checkout', 'shipping', 'store', 'shop now', 'buy now'],
             "content": ['blog', 'news', 'article', 'editorial', 'subscribe to newsletter', 'read more']

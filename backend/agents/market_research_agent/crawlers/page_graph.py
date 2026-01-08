@@ -47,16 +47,29 @@ class PageData:
     page_type: str  # 'home', 'about', 'privacy_policy', etc.
     classification_confidence: float  # 0.0 - 1.0
     canonical_url: Optional[str] = None
+    title: Optional[str] = None
     content_hash: Optional[str] = None  # SHA-256 for determinism
     error: Optional[CrawlError] = None
     depth: int = 0
+    # --- PageArtifact fields (single-pass crawl+extract) ---
+    visible_text: Optional[str] = None
+    extracted_links: List[Dict[str, str]] = field(default_factory=list)  # {"url","text","normalized_url"?}
+    render_type: str = "http"  # "http" | "js" | "cache"
+    render_metadata: Dict[str, Any] = field(default_factory=dict)
+    headers: Dict[str, Any] = field(default_factory=dict)
+    # In-process cache to avoid repeated BeautifulSoup parsing within a scan
+    _soup_cache: Optional[BeautifulSoup] = field(default=None, init=False, repr=False, compare=False)
     
     def __post_init__(self):
         """Compute content hash if HTML present"""
         if self.html and not self.content_hash:
             # Clean HTML for consistent hashing (remove dynamic elements)
-            clean_html = self._clean_for_hash(self.html)
-            self.content_hash = hashlib.sha256(clean_html.encode('utf-8')).hexdigest()
+            clean_text = self._clean_for_hash(self.html)
+            self.content_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
+            # If artifacts were not populated by the fetcher (e.g., cache loads),
+            # at least provide deterministic visible_text for downstream analyzers.
+            if self.visible_text is None:
+                self.visible_text = clean_text
     
     def _clean_for_hash(self, html: str) -> str:
         """Remove dynamic content for consistent hashing"""
@@ -72,7 +85,9 @@ class PageData:
     def get_soup(self) -> Optional[BeautifulSoup]:
         """Parse HTML into BeautifulSoup"""
         if self.html:
-            return BeautifulSoup(self.html, 'html.parser')
+            if self._soup_cache is None:
+                self._soup_cache = BeautifulSoup(self.html, 'html.parser')
+            return self._soup_cache
         return None
 
 

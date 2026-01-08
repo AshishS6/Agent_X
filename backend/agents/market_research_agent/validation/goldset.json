@@ -1,0 +1,28 @@
+{
+  "version": "v2.1.1",
+  "notes": "Populate with >=30 sites. Fill expected outcomes based on manual truth.",
+  "sites": [
+    {
+      "id": "example_static",
+      "url": "https://example.com",
+      "business_name": "",
+      "expect": {
+        "policies": {
+          "privacy_policy": "unknown",
+          "terms_condition": "unknown",
+          "returns_refund": "unknown",
+          "contact_us": "unknown"
+        },
+        "mcc_primary": {
+          "code": "unknown",
+          "min_confidence": 30
+        },
+        "content_risk": {
+          "critical_false_positive_categories_max": 0,
+          "allow_categories": []
+        }
+      }
+    }
+  ]
+}
+

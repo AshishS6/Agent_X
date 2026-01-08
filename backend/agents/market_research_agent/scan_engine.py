@@ -263,15 +263,21 @@ class ModularScanEngine:
             
             # Parse HTML and extract data using modular components
             if page_data.get('success'):
-                soup = crawler.parse_html(page_data['content'])
-                html_text = page_data['text']
-                page_text = soup.get_text(separator=' ', strip=True).lower()
-                
-                # Extract links
-                all_links = LinkExtractor.extract_all_links(soup, final_url)
-                
+                # Per plan: prefer single-pass PageArtifact from PageGraph (avoids re-parsing)
+                home_pg = page_graph.get_page_by_type('home')
+                soup = home_pg.get_soup() if home_pg else crawler.parse_html(page_data['content'])
+                html_text = home_pg.html if home_pg and home_pg.html else page_data['text']
+                page_text = (home_pg.visible_text if home_pg and home_pg.visible_text else soup.get_text(separator=' ', strip=True)).lower()
+
+                # Policy detection inputs: use extracted_links (already resolved) when available
+                links_for_policy = []
+                if home_pg and home_pg.extracted_links:
+                    links_for_policy = [{"url": l.get("url", ""), "text": l.get("text", "")} for l in home_pg.extracted_links if l.get("url")]
+                else:
+                    links_for_policy = LinkExtractor.extract_all_links(soup, final_url)
+
                 # Detect policies - Enhanced with page graph data
-                policy_pages = PolicyDetector.detect_policies(all_links, final_url)
+                policy_pages = PolicyDetector.detect_policies(links_for_policy, final_url)
                 
                 # Enhance policy_pages with pages discovered by orchestrator
                 # Per PRD V2.1.1: Add evidence for policy detection
@@ -745,9 +751,13 @@ class ModularScanEngine:
                         prod_soup = crawler.parse_html(prod_data["content"])
                 
                 if prod_soup:
-                    for el in prod_soup(["script", "style", "nav", "footer", "header"]):
-                        el.decompose()
-                    content_for_extraction += " " + prod_soup.get_text(separator=' ', strip=True).lower()
+                    # Prefer PageArtifact visible_text when available (avoids extra DOM traversal)
+                    if product_page and getattr(product_page, "visible_text", None):
+                        content_for_extraction += " " + product_page.visible_text.lower()
+                    else:
+                        for el in prod_soup(["script", "style", "nav", "footer", "header"]):
+                            el.decompose()
+                        content_for_extraction += " " + prod_soup.get_text(separator=' ', strip=True).lower()
                 
                 # Try pricing page from page graph first
                 pricing_page = page_graph.get_page_by_type('pricing')
@@ -761,9 +771,13 @@ class ModularScanEngine:
                         price_soup = crawler.parse_html(price_data["content"])
                 
                 if price_soup:
-                    for el in price_soup(["script", "style", "nav", "footer", "header"]):
-                        el.decompose()
-                    content_for_extraction += " " + price_soup.get_text(separator=' ', strip=True).lower()
+                    # Prefer PageArtifact visible_text when available (avoids extra DOM traversal)
+                    if pricing_page and getattr(pricing_page, "visible_text", None):
+                        content_for_extraction += " " + pricing_page.visible_text.lower()
+                    else:
+                        for el in price_soup(["script", "style", "nav", "footer", "header"]):
+                            el.decompose()
+                        content_for_extraction += " " + price_soup.get_text(separator=' ', strip=True).lower()
                 
                 # Detect pricing model from content
                 if "subscription" in content_for_extraction or "monthly" in content_for_extraction or "per month" in content_for_extraction:
@@ -1078,104 +1092,58 @@ class ModularScanEngine:
                 # Re-add updated policy_details to report
                 report_builder.add_policy_details(policy_pages)
                 
-                # Content Risk Analysis - per-page with exact source URLs
-                # Build list of candidate pages to analyze with their URLs and text
+                # Content Risk Analysis - coverage-first across all fetched pages
+                # Per plan: consume PageArtifact (visible_text) rather than re-parsing pages again.
                 pages_for_risk = []
-                # Home page
-                pages_for_risk.append({"url": final_url, "text": page_text})
-                # Product page
-                if prod_soup:
-                    pages_for_risk.append({"url": (page_graph.get_page_by_type('product').url if page_graph.get_page_by_type('product') else product_indicators['source_pages'].get('product_page')), "text": prod_soup.get_text(separator=' ', strip=True).lower()})
-                # Pricing page
-                if price_soup:
-                    pages_for_risk.append({"url": (page_graph.get_page_by_type('pricing').url if page_graph.get_page_by_type('pricing') else product_indicators['source_pages'].get('pricing_page')), "text": price_soup.get_text(separator=' ', strip=True).lower()})
-                # About page
-                if about_soup:
-                    about_url = policy_pages.get("about_us", {}).get("url") or (page_graph.get_page_by_type('about').url if page_graph.get_page_by_type('about') else None)
-                    pages_for_risk.append({"url": about_url, "text": about_soup.get_text(separator=' ', strip=True).lower()})
-                
-                # Also include policy pages if present in page graph (often contain prohibited lists)
-                for ptype in ['privacy_policy', 'terms_conditions', 'refund_policy', 'shipping_delivery']:
-                    p = page_graph.get_page_by_type(ptype)
-                    if p and p.status == 200 and p.html:
-                        try:
-                            p_text = p.get_soup().get_text(separator=' ', strip=True).lower()
-                        except Exception:
-                            p_text = p.html.lower()
-                        pages_for_risk.append({"url": p.url, "text": p_text})
-                
-                # First pass: collect occurrences to compute corroboration per (category, keyword)
-                occurrence_map = {}  # (cat, kw) -> set(urls)
-                page_level_findings = []  # store raw items to update later
-                
-                for entry in pages_for_risk:
-                    if not entry.get("text"):
+                for _, p in (page_graph.pages or {}).items():
+                    try:
+                        if not p or getattr(p, "status", 0) != 200:
+                            continue
+                        text = (getattr(p, "visible_text", "") or "").strip()
+                        if not text and getattr(p, "html", ""):
+                            text = getattr(p, "html", "")
+                        if not text:
+                            continue
+                        pages_for_risk.append(
+                            {
+                                "url": getattr(p, "final_url", None) or getattr(p, "url", None) or "unknown",
+                                "text": text.lower(),
+                                "page_type": getattr(p, "page_type", None),
+                                "render_type": getattr(p, "render_type", "http"),
+                            }
+                        )
+                    except Exception:
                         continue
-                    page_result = ContentAnalyzer.analyze_content_risk(
-                        entry["text"],
-                        page_url=entry.get("url"),
-                        multi_page_corroboration=False  # update later
-                    )
-                    # Track occurrences
-                    for item in page_result.get("restricted_keywords_found", []):
-                        key = (item["category"], item["keyword"])
-                        occurrence_map.setdefault(key, set()).add(item["evidence"]["source_url"])
-                        page_level_findings.append(item)
-                
-                # Second pass: update corroboration flags and build final list
-                final_restricted = []
-                for item in page_level_findings:
-                    key = (item["category"], item["keyword"])
-                    corroborated = len(occurrence_map.get(key, set())) > 1
-                    item["evidence"]["corroborated"] = corroborated
-                    # Upgrade severity if corroborated and category severe
-                    if corroborated and item["category"] in ['gambling', 'adult', 'child_pornography']:
-                        item["evidence"]["severity"] = "critical"
-                    final_restricted.append(item)
-                
-                # Dummy evidence aggregation across pages
-                dummy_detected = False
-                dummy_patterns = []
-                dummy_evidence = []
-                for entry in pages_for_risk:
-                    if not entry.get("text"):
-                        continue
-                    dummy_page_check = ContentAnalyzer.analyze_content_risk(
-                        entry["text"],
-                        page_url=entry.get("url"),
-                        multi_page_corroboration=False
-                    )
-                    if dummy_page_check.get("dummy_words_detected"):
-                        dummy_detected = True
-                        dummy_patterns.extend(dummy_page_check.get("dummy_words", []))
-                        dummy_evidence.extend(dummy_page_check.get("dummy_words_evidence", []))
-                
-                # Compute risk score similar to analyzer but based on final_restricted
-                risk_score = len(final_restricted) * 20 + (50 if dummy_detected else 0)
-                
-                # Build unified content risk output
-                content_risk = {
-                    "detection_method": "Rule-based content keyword detection (non-semantic)",
-                    "dummy_words_detected": dummy_detected,
-                    "dummy_words": list(set(dummy_patterns)),
-                    "dummy_words_evidence": dummy_evidence,
-                    "restricted_keywords_found": final_restricted,
-                    "risk_score": risk_score,
-                    "signal_type": "advisory"
-                }
+
+                content_risk = ContentAnalyzer.analyze_content_risk_multi_pages(pages_for_risk)
                 report_builder.add_content_risk(content_risk)
                 
                 # MCC Classification
-                # Per PRD V2.1.1: Collect page URLs for evidence
-                mcc_page_urls = [final_url]  # Start with home page
-                for page_type in ['product', 'pricing', 'about']:
-                    page = page_graph.get_page_by_type(page_type)
-                    if page and page.status == 200:
-                        mcc_page_urls.append(page.url)
-                
+                # Per plan: use combined text across all fetched pages for better context
+                page_texts_by_url = {}
+                render_types_by_url = {}
+                combined_text_parts = []
+                for entry in pages_for_risk:
+                    u = entry.get("url") or "unknown"
+                    t = entry.get("text") or ""
+                    if not t:
+                        continue
+                    page_texts_by_url[u] = t
+                    render_types_by_url[u] = entry.get("render_type") or "http"
+                    combined_text_parts.append(t)
+                combined_text_for_mcc = " ".join(combined_text_parts)
+                if len(combined_text_for_mcc) > 600000:
+                    combined_text_for_mcc = combined_text_for_mcc[:600000]
+
                 # Per PRD V2.1.1: Pass pages_scanned count for transparency
                 pages_scanned_count = len(page_graph.pages) if page_graph else 0
-                mcc_data = self._classify_mcc(page_text, page_urls=mcc_page_urls, pages_scanned=pages_scanned_count)
+                mcc_data = self._classify_mcc(
+                    combined_text_for_mcc,
+                    page_urls=list(page_texts_by_url.keys()),
+                    pages_scanned=pages_scanned_count,
+                    page_texts_by_url=page_texts_by_url,
+                    render_types_by_url=render_types_by_url
+                )
                 report_builder.add_mcc_codes(mcc_data)
                 
                 # Phase E.1: Business Context Classification
@@ -1183,7 +1151,7 @@ class ModularScanEngine:
                 business_context = self.context_classifier.classify(
                     tech_stack,
                     product_indicators,
-                    page_text,
+                    combined_text_for_mcc,
                     mcc_data,
                     page_graph=page_graph
                 )
@@ -1552,7 +1520,14 @@ class ModularScanEngine:
                     "description": "Shipping Policy is recommended for e-commerce sites."
                 })
     
-    def _classify_mcc(self, page_text, page_urls: List[str] = None, pages_scanned: int = 0):
+    def _classify_mcc(
+        self,
+        page_text,
+        page_urls: List[str] = None,
+        pages_scanned: int = 0,
+        page_texts_by_url: dict = None,
+        render_types_by_url: dict = None
+    ):
         """
         Classify MCC codes based on page content.
         Per PRD V2.1.1: Enforce minimum confidence threshold (30%), show evidence, keep advisory.
@@ -1632,10 +1607,19 @@ class ModularScanEngine:
                 for mcc_code, details in codes.items():
                     matched_kws = []
                     score = 0
+                    pages_contributing = set()
                     for keyword in details["keywords"]:
                         if keyword in page_text:
                             score += 1
                             matched_kws.append(keyword)
+                            # Track pages contributing for this MCC match (per plan)
+                            if isinstance(page_texts_by_url, dict) and page_texts_by_url:
+                                for u, t in page_texts_by_url.items():
+                                    try:
+                                        if t and keyword in t:
+                                            pages_contributing.add(u)
+                                    except Exception:
+                                        continue
                     
                     if score > 0:
                         matched_mccs.append({
@@ -1644,7 +1628,8 @@ class ModularScanEngine:
                             "mcc_code": mcc_code,
                             "description": details["description"],
                             "confidence": min(score * 15, 100),
-                            "keywords_matched": matched_kws
+                            "keywords_matched": matched_kws,
+                            "pages_contributing": sorted(list(pages_contributing)) if pages_contributing else (page_urls or [])
                         })
         
         # Sort by confidence
@@ -1663,7 +1648,8 @@ class ModularScanEngine:
                 primary_mcc["evidence"] = EvidenceBuilder.build_mcc_evidence(
                     matched_keywords=primary.get("keywords_matched", []),
                     pages_matched=page_urls or ["unknown"],
-                    confidence=primary["confidence"]
+                    confidence=primary["confidence"],
+                    render_types_by_url=render_types_by_url
                 )
                 primary_mcc["signal_type"] = SignalClassifier.classify_signal("mcc_classification")
             else:
@@ -1676,7 +1662,8 @@ class ModularScanEngine:
                     "evidence": EvidenceBuilder.build_mcc_evidence(
                         matched_keywords=primary.get("keywords_matched", []),
                         pages_matched=page_urls or ["unknown"],
-                        confidence=primary["confidence"]
+                        confidence=primary["confidence"],
+                        render_types_by_url=render_types_by_url
                     ),
                     "signal_type": SignalClassifier.classify_signal("mcc_classification")
                 }
@@ -1689,7 +1676,8 @@ class ModularScanEngine:
                     secondary_mcc["evidence"] = EvidenceBuilder.build_mcc_evidence(
                         matched_keywords=secondary.get("keywords_matched", []),
                         pages_matched=page_urls or ["unknown"],
-                        confidence=secondary["confidence"]
+                        confidence=secondary["confidence"],
+                        render_types_by_url=render_types_by_url
                     )
         
         # Add evidence to all matches
@@ -1698,12 +1686,18 @@ class ModularScanEngine:
                 match["evidence"] = EvidenceBuilder.build_mcc_evidence(
                     matched_keywords=match.get("keywords_matched", []),
                     pages_matched=page_urls or ["unknown"],
-                    confidence=match["confidence"]
+                    confidence=match["confidence"],
+                    render_types_by_url=render_types_by_url
                 )
             match["signal_type"] = SignalClassifier.classify_signal("mcc_classification")
         
         # Per PRD V2.1.1: Show pages contributing and pages scanned vs matched
-        pages_matched_count = len(page_urls) if page_urls else 0
+        primary_pages = []
+        try:
+            primary_pages = (primary_mcc or {}).get("pages_contributing", []) if isinstance(primary_mcc, dict) else []
+        except Exception:
+            primary_pages = []
+        pages_matched_count = len(primary_pages) if primary_pages else (len(page_urls) if page_urls else 0)
         
         return {
             "primary_mcc": primary_mcc,
@@ -1714,6 +1708,6 @@ class ModularScanEngine:
             # Per PRD V2.1.1: Transparency metrics
             "pages_scanned": pages_scanned,
             "pages_matched": pages_matched_count,
-            "pages_contributing": page_urls or [],  # List of page URLs that contributed to classification
+            "pages_contributing": primary_pages or (page_urls or []),  # URLs contributing to primary MCC
             "classification_method": "Keyword-based dictionary matching"
         }

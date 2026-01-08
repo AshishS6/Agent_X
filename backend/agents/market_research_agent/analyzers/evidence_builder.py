@@ -139,7 +139,8 @@ class EvidenceBuilder:
     def build_mcc_evidence(
         matched_keywords: List[str],
         pages_matched: List[str],
-        confidence: float
+        confidence: float,
+        render_types_by_url: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
         Build evidence for MCC classification.
@@ -163,7 +164,9 @@ class EvidenceBuilder:
             confidence=confidence,
             additional_context={
                 "keywords_matched": matched_keywords,
-                "pages_matched": pages_matched
+                "pages_matched": pages_matched,
+                # Provenance: whether pages were fetched via http/js/cache (when provided)
+                "render_types_by_url": render_types_by_url or {}
             }
         )
     

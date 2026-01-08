@@ -6,7 +6,7 @@ Main entry point for parallel website crawling
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, urljoin
 
 import aiohttp
@@ -18,6 +18,7 @@ from .robots_parser import RobotsTxtParser, RobotsRules
 from .sitemap_parser import SitemapParser
 from .navigation_discovery import NavigationDiscovery
 from .crawl_cache import CrawlCache
+from .fetchers import HttpFetcher, JsFetcher, FetchOutput
 
 
 class CrawlOrchestrator:
@@ -33,24 +34,31 @@ class CrawlOrchestrator:
     - Timeout handling
     """
     
-    # Hard limits from PRD
-    MAX_PAGES = 20
-    MAX_DEPTH = 2
+    # Hard limits - increased for better coverage (V2.1.1)
+    MAX_PAGES = 50  # Increased from 20 for comprehensive analysis
+    MAX_DEPTH = 3   # Increased from 2 to capture deeper pages
     PAGE_TIMEOUT = 12  # seconds per page (reduced from 60s, optimized for office networks)
     CONNECT_TIMEOUT = 5  # seconds for initial connection (fail fast)
     TOTAL_TIMEOUT = 600  # seconds total (10 minutes, increased to match Go backend timeout)
     CONCURRENCY = 10  # parallel requests
+    JS_CONCURRENCY = 2  # parallel JS renders (expensive)
     MAX_RETRIES = 1  # Maximum retries per page (like Rust implementation)
     
     # Minimum pages to crawl before allowing early exit
     # This ensures all Policy Details pages have a chance to be discovered
-    MIN_PAGES_BEFORE_EXIT = 10
+    MIN_PAGES_BEFORE_EXIT = 12  # V2.2.1: Increased to ensure policy pages are found
     
     # Required pages for early-exit (core compliance pages)
     REQUIRED_PAGES = {'privacy_policy', 'terms_conditions'}
     
+    # Policy pages that MUST be attempted before early exit (for KYC compliance)
+    # V2.2.1: Separate from HIGH_VALUE_PAGES to ensure these are checked before early exit
+    REQUIRED_POLICY_PAGES = {'shipping_delivery', 'refund_policy'}
+    
     # High value pages - business-critical pages that should be crawled
-    HIGH_VALUE_PAGES = {'about', 'contact', 'pricing', 'product', 'solutions', 'faq'}
+    # V2.2: Added shipping_delivery, refund_policy to ensure policy pages are crawled before early exit
+    HIGH_VALUE_PAGES = {'about', 'contact', 'pricing', 'product', 'solutions', 'faq', 'legal_hub', 
+                        'shipping_delivery', 'refund_policy'}
     
     # All policy detail pages we want to discover (for Policy Details tab)
     POLICY_DETAIL_PAGES = {
@@ -67,6 +75,11 @@ class CrawlOrchestrator:
         self.nav_discovery = NavigationDiscovery(logger=self.logger)
         self.cache = CrawlCache(logger=self.logger)
         self._session: Optional[aiohttp.ClientSession] = None
+        self.http_fetcher = HttpFetcher(user_agent=self.USER_AGENT, logger=self.logger)
+        # Optional: JsFetcher may not be installed. We'll instantiate lazily on demand.
+        self._js_fetcher: Optional[JsFetcher] = None
+        self._js_enabled_for_scan: bool = False
+        self._js_render_budget_remaining: int = 0
     
     def _create_optimized_session(self) -> aiohttp.ClientSession:
         """Create an optimized aiohttp session with connection pooling and DNS caching"""
@@ -184,7 +197,8 @@ class CrawlOrchestrator:
             
             # Phase 2: Fetch homepage
             self.logger.info("[CRAWL] Fetching homepage...")
-            home_page = await self._fetch_page(url, session, 'root', 0, robots_rules)
+            # Homepage is fetched via HTTP first; we may re-fetch with JS if gated.
+            home_page = await self._fetch_page(url, session, 'root', 0, robots_rules, force_fetch_type="http")
             
             if home_page.error:
                 self.logger.error(f"[CRAWL] Homepage fetch failed: {home_page.error.message}")
@@ -210,6 +224,20 @@ class CrawlOrchestrator:
                 self.logger.warning("[CRAWL] Failed to parse homepage HTML")
                 page_graph.metadata.crawl_time_ms = int((time.time() - start_time) * 1000)
                 return page_graph
+
+            # --- JS Render Gating (SPA compatibility) ---
+            # Enable JS rendering if homepage looks JS-heavy / empty content.
+            self._js_enabled_for_scan = self._should_enable_js_rendering(home_page)
+            # Budget: render at most N pages per scan (homepage + key pages)
+            self._js_render_budget_remaining = 6 if self._js_enabled_for_scan else 0
+            if self._js_enabled_for_scan:
+                self.logger.info(f"[CRAWL][JS] JS rendering enabled (budget={self._js_render_budget_remaining})")
+                # Try upgrading homepage via JS render if it improves visible text significantly.
+                upgraded = await self._maybe_upgrade_page_with_js(home_page, robots_rules)
+                if upgraded:
+                    home_page = upgraded
+                    page_graph.add_page(home_page)  # replace stored page for 'home'
+                    home_soup = home_page.get_soup()
             
             # Phase 4: Sitemap Discovery
             sitemap_start_time = time.monotonic()
@@ -252,42 +280,106 @@ class CrawlOrchestrator:
             filtered_assets = 0
             filtered_patterns = 0
             
-            # Add sitemap URLs
-            for sitemap_url in sitemap_urls:
-                normalized = URLNormalizer.normalize(sitemap_url)
+            # Build a deterministic priority frontier (per plan)
+            # Candidate ranking:
+            # - page_type priority (PageClassifier.get_priority_score)
+            # - source rank: sitemap > nav_primary > nav_secondary
+            # - classifier confidence
+            # - url (stable tie-breaker)
+            source_rank = {"sitemap": 3, "nav_primary": 2, "nav_secondary": 1}
+            candidates_by_norm: Dict[str, Dict[str, Any]] = {}
+
+            def consider_candidate(raw_url: str, source: str, depth_val: int, anchor_text: str = ""):
+                nonlocal filtered_duplicates, filtered_patterns
+                normalized = URLNormalizer.normalize(raw_url)
                 if normalized in fetched_urls:
                     filtered_duplicates += 1
-                    continue
-                classification = PageClassifier.classify(sitemap_url)
-                if classification['type'] == 'skip':
+                    return
+                classification = PageClassifier.classify(raw_url, anchor_text)
+                if classification["type"] == "skip":
                     filtered_patterns += 1
-                    continue
-                urls_to_fetch.append((sitemap_url, 'sitemap', 1))
-                fetched_urls.add(normalized)
-            
-            # Add nav links
+                    return
+                prio = PageClassifier.get_priority_score(classification["type"])
+                cand = {
+                    "url": raw_url,
+                    "source": source,
+                    "depth": depth_val,
+                    "priority": prio,
+                    "confidence": classification.get("confidence", 0.0),
+                    "page_type": classification.get("type", "other"),
+                }
+                existing = candidates_by_norm.get(normalized)
+                if not existing:
+                    candidates_by_norm[normalized] = cand
+                    return
+                # Keep the better candidate deterministically
+                existing_key = (
+                    existing["priority"],
+                    source_rank.get(existing["source"], 0),
+                    existing.get("confidence", 0.0),
+                )
+                cand_key = (
+                    cand["priority"],
+                    source_rank.get(cand["source"], 0),
+                    cand.get("confidence", 0.0),
+                )
+                if cand_key > existing_key:
+                    candidates_by_norm[normalized] = cand
+
+            for sitemap_url in sitemap_urls:
+                consider_candidate(sitemap_url, "sitemap", 1, "")
+
             for nav_link in nav_links:
-                normalized = nav_link['normalized_url']
-                if normalized in fetched_urls:
-                    filtered_duplicates += 1
-                    continue
-                source = 'nav_primary' if nav_link['source'] in ('nav', 'header', 'footer') else 'nav_secondary'
-                urls_to_fetch.append((nav_link['url'], source, 1))
-                fetched_urls.add(normalized)
+                src = "nav_primary" if nav_link["source"] in ("nav", "header", "footer", "menu") else "nav_secondary"
+                consider_candidate(nav_link["url"], src, 1, nav_link.get("text", "") or "")
+
+            # Final deterministic ordering
+            ordered = sorted(
+                candidates_by_norm.values(),
+                key=lambda c: (
+                    -c["priority"],
+                    -source_rank.get(c["source"], 0),
+                    -float(c.get("confidence", 0.0)),
+                    c["url"],
+                ),
+            )
+
+            for cand in ordered:
+                urls_to_fetch.append((cand["url"], cand["source"], cand["depth"]))
+                fetched_urls.add(URLNormalizer.normalize(cand["url"]))
             
             normalization_duration = time.monotonic() - normalization_start_time
             urls_after_normalization = len(urls_to_fetch)
             total_filtered = filtered_duplicates + filtered_assets + filtered_patterns
             self.logger.info(f"[SCAN][{scan_id_display}][NORMALIZE] URL normalization completed in {normalization_duration:.2f}s - before={urls_before_normalization}, after={urls_after_normalization}, filtered={total_filtered} (duplicates={filtered_duplicates}, assets={filtered_assets}, patterns={filtered_patterns})")
             
-            # Phase 6: Crawl Queue Construction
+            # Phase 6: Crawl Queue Construction with Priority Sorting
             queue_start_time = time.monotonic()
             self.logger.info(f"[SCAN][{scan_id_display}][QUEUE] Crawl queue construction started")
             
             page_graph.metadata.pages_discovered = len(urls_to_fetch) + 1
             
-            # Count URLs by priority
+            # V2.2.1: Sort URLs by priority to ensure policy pages are fetched first
+            # Priority: 0=required, 1=required_policy, 2=high_value, 3=other
+            def get_priority(url_tuple):
+                url, source, depth = url_tuple
+                classification = PageClassifier.classify(url)
+                page_type = classification['type']
+                if page_type in self.REQUIRED_PAGES:
+                    return 0  # Highest priority (privacy, terms)
+                elif page_type in self.REQUIRED_POLICY_PAGES:
+                    return 1  # Second highest (shipping, refund)
+                elif page_type in self.HIGH_VALUE_PAGES:
+                    return 2  # High value (about, contact, product)
+                else:
+                    return 3  # Everything else
+            
+            # Sort by priority (lower = higher priority)
+            urls_to_fetch.sort(key=get_priority)
+            
+            # Count URLs by priority (for logging)
             required_count = 0
+            required_policy_count = 0
             high_value_count = 0
             low_value_count = 0
             for url_tuple in urls_to_fetch:
@@ -296,6 +388,8 @@ class CrawlOrchestrator:
                 page_type = classification['type']
                 if page_type in self.REQUIRED_PAGES:
                     required_count += 1
+                elif page_type in self.REQUIRED_POLICY_PAGES:
+                    required_policy_count += 1
                 elif page_type in self.HIGH_VALUE_PAGES:
                     high_value_count += 1
                 else:
@@ -303,7 +397,7 @@ class CrawlOrchestrator:
             
             max_pages_applied = min(self.MAX_PAGES - 1, len(urls_to_fetch))
             queue_duration = time.monotonic() - queue_start_time
-            self.logger.info(f"[SCAN][{scan_id_display}][QUEUE] Crawl queue constructed in {queue_duration:.2f}s - total_queued={len(urls_to_fetch)}, priority_breakdown=required={required_count}, high={high_value_count}, low={low_value_count}, max_pages_limit={self.MAX_PAGES}, pages_to_fetch={max_pages_applied}")
+            self.logger.info(f"[SCAN][{scan_id_display}][QUEUE] Crawl queue constructed in {queue_duration:.2f}s - total_queued={len(urls_to_fetch)}, priority_breakdown=required={required_count}, required_policy={required_policy_count}, high={high_value_count}, low={low_value_count}, max_pages_limit={self.MAX_PAGES}, pages_to_fetch={max_pages_applied}")
             
             self.logger.info(f"[CRAWL] {len(urls_to_fetch)} URLs queued for fetching")
             
@@ -364,16 +458,23 @@ class CrawlOrchestrator:
                     # Only consider early exit after MIN_PAGES_BEFORE_EXIT to ensure policy pages are discovered
                     if page_graph.metadata.pages_fetched >= self.MIN_PAGES_BEFORE_EXIT:
                         if page_graph.has_required_pages():
-                            # Also check if we have high-value pages
+                            # V2.2.1: Must have BOTH:
+                            # 1. At least some high-value pages
+                            # 2. At least one policy page (shipping_delivery OR refund_policy) for KYC compliance
                             found_types = set(page_graph.get_found_page_types())
-                            if self.HIGH_VALUE_PAGES & found_types:
+                            has_high_value = bool(self.HIGH_VALUE_PAGES & found_types)
+                            has_policy_page = bool(self.REQUIRED_POLICY_PAGES & found_types)
+                            
+                            # Only exit if we have both general high-value and at least one policy page
+                            if has_high_value and has_policy_page:
                                 page_graph.metadata.early_exit = True
-                                page_graph.metadata.early_exit_reason = "All required + high-value pages found"
+                                page_graph.metadata.early_exit_reason = "All required + high-value + policy pages found"
                                 early_exit_triggered = True
                                 early_exit_at_count = pages_attempted
                                 required_pages_found = [pt for pt in self.REQUIRED_PAGES if page_graph.get_page_by_type(pt)]
                                 high_value_found = [pt for pt in self.HIGH_VALUE_PAGES if page_graph.get_page_by_type(pt)]
-                                self.logger.info(f"[SCAN][{scan_id_display}][EARLY_EXIT] Early exit triggered at crawl_count={early_exit_at_count} - required_pages_found={required_pages_found}, high_value_found={high_value_found}, reason={page_graph.metadata.early_exit_reason}")
+                                policy_found = [pt for pt in self.REQUIRED_POLICY_PAGES if page_graph.get_page_by_type(pt)]
+                                self.logger.info(f"[SCAN][{scan_id_display}][EARLY_EXIT] Early exit triggered at crawl_count={early_exit_at_count} - required_pages_found={required_pages_found}, high_value_found={high_value_found}, policy_found={policy_found}, reason={page_graph.metadata.early_exit_reason}")
                                 self.logger.info(f"[CRAWL] Early exit: {page_graph.metadata.early_exit_reason}")
                                 break
             
@@ -408,6 +509,43 @@ class CrawlOrchestrator:
             classification_duration = time.monotonic() - classification_start_time
             type_summary = ", ".join([f"{pt}={count}" for pt, count in sorted(page_type_counts.items())])
             self.logger.info(f"[SCAN][{scan_id_display}][CLASSIFY] Page classification completed in {classification_duration:.2f}s - counts={type_summary}")
+            
+            # Phase 9: Policy Discovery from Legal Hub Pages
+            # If we didn't find required pages (privacy/terms), check legal_hub pages for policy links
+            found_types = set(page_graph.get_found_page_types())
+            missing_required = self.REQUIRED_PAGES - found_types
+            
+            if missing_required and page_graph.metadata.pages_fetched < self.MAX_PAGES:
+                legal_hub = page_graph.get_page_by_type('legal_hub')
+                if legal_hub and legal_hub.extracted_links:
+                    self.logger.info(f"[SCAN][{scan_id_display}][POLICY_DISCOVERY] Looking for policy pages in legal_hub: {legal_hub.url}")
+                    policy_urls_to_fetch = []
+                    
+                    for link in legal_hub.extracted_links:
+                        link_url = link.get('url', '')
+                        link_text = link.get('text', '').lower()
+                        
+                        # Check if this link looks like a policy page
+                        link_class = PageClassifier.classify(link_url, link_text)
+                        if link_class['type'] in self.REQUIRED_PAGES:
+                            normalized = URLNormalizer.normalize(link_url)
+                            if normalized not in fetched_urls:
+                                policy_urls_to_fetch.append((link_url, 'legal_hub_discovery', 2))
+                                fetched_urls.add(normalized)
+                    
+                    if policy_urls_to_fetch:
+                        self.logger.info(f"[SCAN][{scan_id_display}][POLICY_DISCOVERY] Fetching {len(policy_urls_to_fetch)} discovered policy pages")
+                        policy_pages = await self._fetch_pages_parallel(
+                            policy_urls_to_fetch[:5],  # Limit to 5 policy pages
+                            session,
+                            robots_rules,
+                            page_graph,
+                            scan_id=scan_id
+                        )
+                        # Re-check found types
+                        found_types = set(page_graph.get_found_page_types())
+                        now_found = self.REQUIRED_PAGES & found_types
+                        self.logger.info(f"[SCAN][{scan_id_display}][POLICY_DISCOVERY] After discovery: required_pages_found={list(now_found)}")
                 
         except asyncio.TimeoutError:
             self.logger.warning(f"[SCAN][{scan_id_display}][CRAWL] Total timeout exceeded ({self.TOTAL_TIMEOUT}s)")
@@ -478,7 +616,8 @@ class CrawlOrchestrator:
         session: aiohttp.ClientSession,
         source: str,
         depth: int,
-        robots_rules: RobotsRules
+        robots_rules: RobotsRules,
+        force_fetch_type: Optional[str] = None  # "http" | "js"
     ) -> PageData:
         """Fetch a single page with retry logic and optimized timeouts"""
         
@@ -505,6 +644,7 @@ class CrawlOrchestrator:
             if cached_page:
                 self.logger.info(f"[CACHE] HIT for {url}")
                 cached_page.source = "cache"
+                cached_page.render_type = "cache"
                 return cached_page
             else:
                 self.logger.info(f"[CACHE] MISS for {url}")
@@ -518,126 +658,137 @@ class CrawlOrchestrator:
         
         while retries <= self.MAX_RETRIES:
             try:
-                # Use session's configured timeout (already optimized)
-                async with session.get(
-                    url,
-                    allow_redirects=True
-                ) as response:
-                    content_type = response.headers.get('Content-Type', '')
-                    status_code = response.status
+                fetch_type = force_fetch_type or ("js" if self._should_render_url_with_js(url) else "http")
+
+                if fetch_type == "js":
+                    self.logger.info(f"[CRAWL][JS] Rendering with Playwright: {url}")
+                    fetch_out = await self._fetch_with_js(url)
+                    self.logger.info(f"[CRAWL][JS] Render complete: {url} (status={fetch_out.status}, html_len={len(fetch_out.html or '')})")
                     
-                    # Don't retry on 4xx errors (client errors)
-                    if 400 <= status_code < 500:
-                        if status_code == 410:
-                            # HTTP 410 Gone - don't retry
-                            return PageData(
-                                url=url,
-                                final_url=str(response.url),
-                                status=status_code,
-                                content_type=content_type,
-                                html='',
-                                source=source,
-                                page_type='other',
-                                classification_confidence=0.0,
-                                depth=depth,
-                                error=CrawlError(type='http_error', message=f'HTTP {status_code} Gone', status_code=status_code)
-                            )
-                        # Other 4xx errors - return immediately without retry
-                        html = await response.text() if 'text/html' in content_type.lower() else ''
+                    # FALLBACK: If JS rendering failed (status=0 or empty html), try HTTP
+                    if fetch_out.status == 0 or not fetch_out.html:
+                        self.logger.info(f"[CRAWL][JS] JS render failed, falling back to HTTP: {url}")
+                        fetch_out = await self.http_fetcher.fetch(session, url)
+                        fetch_out.fetch_metadata["js_fallback"] = True
+                else:
+                    fetch_out = await self.http_fetcher.fetch(session, url)
+
+                content_type = fetch_out.content_type
+                status_code = fetch_out.status
+
+                # Don't retry on 4xx errors (client errors)
+                if 400 <= status_code < 500:
+                    if status_code == 410:
+                        # HTTP 410 Gone - don't retry
                         return PageData(
                             url=url,
-                            final_url=str(response.url),
-                            status=status_code,
-                            content_type=content_type,
-                            html=html,
-                            source=source,
-                            page_type='other',
-                            classification_confidence=0.0,
-                            depth=depth,
-                            error=CrawlError(type='http_error', message=f'HTTP {status_code}', status_code=status_code)
-                        )
-                    
-                    # Retry on 5xx errors if retries remaining
-                    if 500 <= status_code < 600:
-                        # Read response body to avoid connection leaks
-                        try:
-                            await response.read()
-                        except Exception:
-                            pass
-                        
-                        if retries < self.MAX_RETRIES:
-                            retries += 1
-                            self.logger.debug(f"[CRAWL] Server error {status_code} for {url}, retrying ({retries}/{self.MAX_RETRIES})")
-                            await asyncio.sleep(backoff_ms / 1000.0)
-                            backoff_ms *= 2
-                            continue
-                        else:
-                            # Max retries reached
-                            return PageData(
-                                url=url,
-                                final_url=str(response.url),
-                                status=status_code,
-                                content_type=content_type,
-                                html='',
-                                source=source,
-                                page_type='other',
-                                classification_confidence=0.0,
-                                depth=depth,
-                                error=CrawlError(type='http_error', message=f'HTTP {status_code} after {self.MAX_RETRIES} retries', status_code=status_code)
-                            )
-                    
-                    # Only process HTML
-                    if 'text/html' not in content_type.lower():
-                        return PageData(
-                            url=url,
-                            final_url=str(response.url),
+                            final_url=fetch_out.final_url,
                             status=status_code,
                             content_type=content_type,
                             html='',
                             source=source,
                             page_type='other',
                             classification_confidence=0.0,
-                            depth=depth
+                            depth=depth,
+                            error=CrawlError(type='http_error', message=f'HTTP {status_code} Gone', status_code=status_code)
                         )
-                    
-                    html = await response.text()
-                    final_url = str(response.url)
-                    
-                    # Parse and extract canonical
-                    soup = BeautifulSoup(html, 'html.parser')
-                    canonical = URLNormalizer.extract_canonical(soup, final_url)
-                    
-                    # Classify page
-                    title = ''
-                    title_tag = soup.find('title')
-                    if title_tag:
-                        title = title_tag.get_text(strip=True)
-                    
-                    classification = PageClassifier.classify(url, '', title)
-                    
-                    page_data = PageData(
+                    # Other 4xx errors - return immediately without retry
+                    html = fetch_out.html if 'text/html' in content_type.lower() else ''
+                    return PageData(
                         url=url,
-                        final_url=final_url,
-                        canonical_url=canonical,
+                        final_url=fetch_out.final_url,
                         status=status_code,
                         content_type=content_type,
                         html=html,
                         source=source,
-                        page_type=classification['type'],
-                        classification_confidence=classification['confidence'],
+                        page_type='other',
+                        classification_confidence=0.0,
                         depth=depth,
-                        error=None if status_code < 400 else CrawlError.from_exception(Exception(f"HTTP {status_code}"), status_code)
+                        error=CrawlError(type='http_error', message=f'HTTP {status_code}', status_code=status_code)
                     )
-                    
-                    # Update Cache
-                    if page_data.status == 200:
-                        try:
-                            await asyncio.to_thread(self.cache.set, page_data)
-                        except Exception as e:
-                            self.logger.warning(f"[CACHE] Failed to set cache: {e}")
-                    
-                    return page_data
-                    
+
+                # Retry on 5xx errors if retries remaining
+                if 500 <= status_code < 600:
+                    if retries < self.MAX_RETRIES:
+                        retries += 1
+                        self.logger.debug(f"[CRAWL] Server error {status_code} for {url}, retrying ({retries}/{self.MAX_RETRIES})")
+                        await asyncio.sleep(backoff_ms / 1000.0)
+                        backoff_ms *= 2
+                        continue
+                    else:
+                        # Max retries reached
+                        return PageData(
+                            url=url,
+                            final_url=fetch_out.final_url,
+                            status=status_code,
+                            content_type=content_type,
+                            html='',
+                            source=source,
+                            page_type='other',
+                            classification_confidence=0.0,
+                            depth=depth,
+                            error=CrawlError(type='http_error', message=f'HTTP {status_code} after {self.MAX_RETRIES} retries', status_code=status_code)
+                        )
+
+                # Only process HTML
+                if 'text/html' not in content_type.lower():
+                    return PageData(
+                        url=url,
+                        final_url=fetch_out.final_url,
+                        status=status_code,
+                        content_type=content_type,
+                        html='',
+                        source=source,
+                        page_type='other',
+                        classification_confidence=0.0,
+                        depth=depth
+                    )
+
+                html = fetch_out.html
+                final_url = fetch_out.final_url
+
+                # Parse and extract canonical
+                soup = BeautifulSoup(html, 'html.parser')
+                canonical = URLNormalizer.extract_canonical(soup, final_url)
+
+                # Classify page
+                title = ''
+                title_tag = soup.find('title')
+                if title_tag:
+                    title = title_tag.get_text(strip=True)
+
+                classification = PageClassifier.classify(url, '', title)
+
+                visible_text, extracted_links = self._extract_artifacts(soup, final_url)
+
+                page_data = PageData(
+                    url=url,
+                    final_url=final_url,
+                    canonical_url=canonical,
+                    status=status_code,
+                    content_type=content_type,
+                    html=html,
+                    source=source,
+                    page_type=classification['type'],
+                    classification_confidence=classification['confidence'],
+                    depth=depth,
+                    error=None if status_code < 400 else CrawlError.from_exception(Exception(f"HTTP {status_code}"), status_code),
+                    title=title,
+                    visible_text=visible_text,
+                    extracted_links=extracted_links,
+                    render_type=fetch_out.fetch_type,
+                    render_metadata=fetch_out.fetch_metadata,
+                    headers=fetch_out.headers
+                )
+
+                # Update Cache
+                if page_data.status == 200:
+                    try:
+                        await asyncio.to_thread(self.cache.set, page_data)
+                    except Exception as e:
+                        self.logger.warning(f"[CACHE] Failed to set cache: {e}")
+
+                return page_data
             except asyncio.TimeoutError:
                 if retries < self.MAX_RETRIES:
                     retries += 1
@@ -712,6 +863,176 @@ class CrawlOrchestrator:
             depth=depth,
             error=CrawlError(type='unknown', message='Max retries exceeded')
         )
+
+    def _extract_artifacts(self, soup: BeautifulSoup, page_url: str) -> tuple[str, List[Dict[str, str]]]:
+        """
+        Build PageArtifact fields once per fetch:
+        - visible_text: cleaned visible text
+        - extracted_links: list of {"url","text"} for all <a href> links
+        """
+        # Visible text (remove script/style/noscript/template)
+        for tag in soup(["script", "style", "noscript", "template"]):
+            tag.decompose()
+        visible_text = soup.get_text(separator=" ", strip=True)
+        if len(visible_text) > 200000:
+            visible_text = visible_text[:200000]
+
+        from urllib.parse import urljoin
+        links: List[Dict[str, str]] = []
+        for a in soup.find_all("a", href=True):
+            href = a.get("href", "")
+            if not href:
+                continue
+            # Skip non-navigational schemes
+            if href.startswith("#") or href.startswith("javascript:") or href.startswith("mailto:") or href.startswith("tel:"):
+                continue
+            full_url = urljoin(page_url, href)
+            links.append(
+                {
+                    "url": full_url,
+                    "text": a.get_text(strip=True) or "",
+                    "normalized_url": URLNormalizer.normalize(full_url),
+                }
+            )
+            if len(links) >= 2000:
+                break
+
+        return visible_text, links
+
+    def _should_enable_js_rendering(self, home_page: PageData) -> bool:
+        """
+        Domain-level gating: enable JS rendering when homepage looks like an SPA/empty shell.
+        """
+        html = home_page.html or ""
+        text = (home_page.visible_text or "").strip()
+        # Very low visible text is a strong indicator for JS-rendered SPA shells
+        if len(text) < 400:
+            # SPA markers
+            markers = [
+                "id=\"__next\"",
+                "id=\"root\"",
+                "id=\"app\"",
+                "__NEXT_DATA__",
+                "data-reactroot",
+                "ng-version",
+                "vue-app",
+            ]
+            if any(m.lower() in html.lower() for m in markers):
+                return True
+            # Many script tags and low text
+            try:
+                soup = home_page.get_soup()
+                if soup:
+                    scripts = len(soup.find_all("script"))
+                    if scripts >= 15:
+                        return True
+            except Exception:
+                return True
+        return False
+
+    def _should_render_url_with_js(self, url: str) -> bool:
+        """
+        Per-URL gating under a scan budget:
+        - Only render when JS mode enabled AND budget remains
+        - Prefer required + high-value pages (policy/pricing/product/about/contact)
+        """
+        if not self._js_enabled_for_scan:
+            return False
+        if self._js_render_budget_remaining <= 0:
+            return False
+        classification = PageClassifier.classify(url)
+        page_type = classification.get("type", "other")
+        return page_type in (self.REQUIRED_PAGES | self.HIGH_VALUE_PAGES)
+
+    async def _fetch_with_js(self, url: str) -> FetchOutput:
+        """
+        Fetch page with JsFetcher under budget. If Playwright isn't available, fall back.
+        """
+        if self._js_fetcher is None:
+            self._js_fetcher = JsFetcher(user_agent=self.USER_AGENT, logger=self.logger)
+        # Decrement budget when attempting (prevents infinite retries).
+        self._js_render_budget_remaining = max(0, self._js_render_budget_remaining - 1)
+        try:
+            return await self._js_fetcher.fetch(url)
+        except ImportError as e:
+            # Playwright not installed - disable JS for this scan
+            self.logger.warning(f"[CRAWL][JS] JS rendering unavailable ({e}); disabling JS for this scan")
+            self._js_enabled_for_scan = False
+            return FetchOutput(
+                url=url,
+                final_url=url,
+                status=0,
+                content_type="",
+                html="",
+                headers={},
+                fetch_type="http",
+                fetch_metadata={"js_disabled": True, "reason": "playwright_missing"},
+            )
+        except Exception as e:
+            self.logger.warning(f"[CRAWL][JS] JS render failed for {url}: {e}")
+            return FetchOutput(
+                url=url,
+                final_url=url,
+                status=0,
+                content_type="",
+                html="",
+                headers={},
+                fetch_type="js",
+                fetch_metadata={"error": str(e)},
+            )
+
+    async def _maybe_upgrade_page_with_js(self, page: PageData, robots_rules: RobotsRules) -> Optional[PageData]:
+        """
+        Attempt to re-fetch a page with JS rendering if it improves visible text meaningfully.
+        Used primarily for the homepage to unlock better discovery/analysis on SPAs.
+        """
+        if not self._js_enabled_for_scan or self._js_render_budget_remaining <= 0:
+            return None
+        # Respect robots rules (same as HTTP fetch)
+        if robots_rules.found:
+            parsed = urlparse(page.url)
+            if not robots_rules.is_allowed(parsed.path):
+                return None
+
+        fetch_out = await self._fetch_with_js(page.url)
+        if fetch_out.status == 0 or not fetch_out.html:
+            return None
+
+        soup = BeautifulSoup(fetch_out.html, "html.parser")
+        canonical = URLNormalizer.extract_canonical(soup, fetch_out.final_url)
+        title = ""
+        title_tag = soup.find("title")
+        if title_tag:
+            title = title_tag.get_text(strip=True)
+        classification = PageClassifier.classify(page.url, "", title)
+        visible_text, extracted_links = self._extract_artifacts(soup, fetch_out.final_url)
+
+        # Upgrade only if text increases significantly
+        old_len = len((page.visible_text or "").strip())
+        new_len = len(visible_text.strip())
+        if new_len < max(600, old_len * 2):
+            return None
+
+        upgraded = PageData(
+            url=page.url,
+            final_url=fetch_out.final_url,
+            status=fetch_out.status,
+            content_type=fetch_out.content_type or page.content_type,
+            html=fetch_out.html,
+            source=page.source,
+            page_type=classification["type"] or page.page_type,
+            classification_confidence=classification.get("confidence", 0.0) or page.classification_confidence,
+            canonical_url=canonical,
+            title=title,
+            visible_text=visible_text,
+            extracted_links=extracted_links,
+            depth=page.depth,
+            render_type="js",
+            render_metadata={**fetch_out.fetch_metadata, "upgrade_reason": "homepage_low_text"},
+            headers=fetch_out.headers,
+        )
+        self.logger.info(f"[CRAWL][JS] Upgraded homepage via JS render (text_len {old_len} -> {new_len})")
+        return upgraded
     
     async def _fetch_pages_parallel(
         self,
@@ -723,10 +1044,13 @@ class CrawlOrchestrator:
     ) -> List[PageData]:
         """Fetch multiple pages in parallel with concurrency control"""
         
-        semaphore = asyncio.Semaphore(self.CONCURRENCY)
+        http_semaphore = asyncio.Semaphore(self.CONCURRENCY)
+        js_semaphore = asyncio.Semaphore(self.JS_CONCURRENCY)
         
         async def fetch_with_semaphore(url: str, source: str, depth: int) -> PageData:
-            async with semaphore:
+            # Pick semaphore based on whether this URL will be JS-rendered
+            sem = js_semaphore if self._should_render_url_with_js(url) else http_semaphore
+            async with sem:
                 # Check for early exit before fetching
                 if page_graph.metadata.early_exit:
                     return PageData(

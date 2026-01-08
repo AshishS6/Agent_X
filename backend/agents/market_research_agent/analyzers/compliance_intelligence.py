@@ -193,17 +193,51 @@ class ComplianceIntelligence:
             policy_breakdown.append(breakdown_item)
             
         
-        # 3. Trust & Risk (Max 30) - Context Conditioned
+        # 3. Trust & Risk (Max 30) - Context Conditioned with Intent Awareness
         trust_score = 30
         risk_flags = []
+        
+        # Policy page types where prohibitive intent reduces penalties
+        policy_page_types = ['privacy_policy', 'terms_conditions', 'terms_condition', 
+                            'refund_policy', 'returns_refund', 'acceptable_use']
         
         restricted = content_risk.get('restricted_keywords_found', [])
         for item in restricted:
             cat = item.get('category')
             keyword = item.get('keyword', 'unknown')
+            intent = item.get('intent', 'neutral')  # NEW: Intent classification
+            page_type = item.get('page_type', 'unknown')  # NEW: Page type context
             penalty = 0
             penalty_adjustment_reason = ""
             business_context_applied = ""
+            
+            # NEW: Check if this is prohibitive intent on a policy page
+            # These are informational mentions (e.g., "we do not allow gambling")
+            is_policy_page = page_type in policy_page_types
+            if is_policy_page and intent == "prohibitive":
+                # Prohibitive intent on policy pages = informational only, no penalty
+                penalty = 0
+                penalty_adjustment_reason = f"Prohibitive intent detected on {page_type} (legal boilerplate, not actual risk)"
+                business_context_applied = context_type or "UNKNOWN"
+                
+                # Add as informational flag, not a penalty
+                risk_flags.append({
+                    "type": "policy_mention",
+                    "severity": "info",
+                    "message": f"Policy page mentions {cat} in prohibitive context ('{keyword}')",
+                    "penalty": 0,
+                    "penalty_adjustment_reason": penalty_adjustment_reason,
+                    "business_context_applied": business_context_applied,
+                    "signal_reference": "content_risk_detection",
+                    "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
+                    "triggering_keyword": keyword,
+                    "triggering_category": cat,
+                    "intent": intent,
+                    "page_type": page_type,
+                    "source_url": item.get('evidence', {}).get('source_url', 'unknown') if isinstance(item.get('evidence'), dict) else 'unknown',
+                    "evidence_snippet": item.get('intent_context', '') or (item.get('evidence', {}).get('evidence_snippet', '') if isinstance(item.get('evidence'), dict) else '')
+                })
+                continue  # Skip normal penalty processing
             
             # Context Logic for Crypto
             if cat == 'crypto':
@@ -222,11 +256,62 @@ class ComplianceIntelligence:
                          "signal_reference": "content_risk_detection",
                          "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
                          "triggering_keyword": keyword,
-                         "triggering_category": cat
+                         "triggering_category": cat,
+                         "intent": intent,
+                         "page_type": page_type
                     })
                 else:
                     penalty = 5 # Standard penalty for others (e.g. Ecom)
                     penalty_adjustment_reason = "Standard penalty for crypto content in non-crypto context"
+                    business_context_applied = context_type or "UNKNOWN"
+            # Context Logic for Forex - Fintech companies naturally deal with currency/forex
+            elif cat == 'forex':
+                if context_type == BusinessContextClassifier.CONTEXT_FINTECH:
+                    penalty = 0 # Neutral / Informational for payment/fintech companies
+                    penalty_adjustment_reason = f"Reduced due to {context_type} context (forex/currency content is expected)"
+                    business_context_applied = context_type
+                    # Add info flag instead of penalty
+                    risk_flags.append({
+                         "type": "contextual_info",
+                         "severity": "info",
+                         "message": f"Forex/currency content detected (Expected for {context_type})",
+                         "penalty": 0,
+                         "penalty_adjustment_reason": penalty_adjustment_reason,
+                         "business_context_applied": business_context_applied,
+                         "signal_reference": "content_risk_detection",
+                         "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
+                         "triggering_keyword": keyword,
+                         "triggering_category": cat,
+                         "intent": intent,
+                         "page_type": page_type
+                    })
+                else:
+                    penalty = 5 # Standard penalty for forex in non-fintech contexts
+                    penalty_adjustment_reason = "Standard penalty for forex content in non-fintech context"
+                    business_context_applied = context_type or "UNKNOWN"
+            # Context Logic for Securities/Money Transfer - also expected for fintech
+            elif cat in ['securities', 'money_transfer', 'money_changer', 'digital_lending']:
+                if context_type == BusinessContextClassifier.CONTEXT_FINTECH:
+                    penalty = 0 # Neutral / Informational for payment/fintech companies
+                    penalty_adjustment_reason = f"Reduced due to {context_type} context ({cat} content is expected)"
+                    business_context_applied = context_type
+                    risk_flags.append({
+                         "type": "contextual_info",
+                         "severity": "info",
+                         "message": f"{cat.replace('_', ' ').title()} content detected (Expected for {context_type})",
+                         "penalty": 0,
+                         "penalty_adjustment_reason": penalty_adjustment_reason,
+                         "business_context_applied": business_context_applied,
+                         "signal_reference": "content_risk_detection",
+                         "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
+                         "triggering_keyword": keyword,
+                         "triggering_category": cat,
+                         "intent": intent,
+                         "page_type": page_type
+                    })
+                else:
+                    penalty = 5 # Standard penalty for financial content in non-fintech contexts
+                    penalty_adjustment_reason = f"Standard penalty for {cat} content in non-fintech context"
                     business_context_applied = context_type or "UNKNOWN"
             elif cat == 'gambling': 
                 penalty = 15
@@ -239,6 +324,12 @@ class ComplianceIntelligence:
             elif cat == 'pharmacy': 
                 penalty = 10
                 penalty_adjustment_reason = "Standard penalty for pharmacy content"
+                business_context_applied = context_type or "UNKNOWN"
+            # Default: Low-risk categories with no specific handling
+            # These include: alcohol, tobacco, mlm, etc. - advisory but low penalty
+            elif cat in ['alcohol', 'tobacco']:
+                penalty = 3 # Lower penalty for age-restricted but legal products
+                penalty_adjustment_reason = f"Low penalty for {cat} (age-restricted but legal)"
                 business_context_applied = context_type or "UNKNOWN"
             
             if penalty > 0:
@@ -256,6 +347,8 @@ class ComplianceIntelligence:
                     "signal_type": SignalClassifier.classify_signal("content_risk_detection"),
                     "triggering_keyword": keyword,
                     "triggering_category": cat,
+                    "intent": intent,  # NEW: Include intent for transparency
+                    "page_type": page_type,  # NEW: Include page type for transparency
                     # Per PRD: Include source URL and snippet from content_risk evidence
                     "source_url": item.get('evidence', {}).get('source_url', 'unknown') if isinstance(item.get('evidence'), dict) else 'unknown',
                     "evidence_snippet": item.get('evidence', {}).get('evidence_snippet', '') if isinstance(item.get('evidence'), dict) else ''

@@ -40,10 +40,19 @@ class PolicyDetector:
             (r'data[-_]?protection', 0.7),
         ],
         "terms_condition": [
+            # Hyphen/underscore versions (for URLs)
             (r'terms?[-_]?(and[-_]?|\&[-_]?)?conditions?', 1.0),
             (r'terms?[-_]?of[-_]?(service|use)', 1.0),
+            # Space versions (for link text like "Terms of Use", "Terms and Conditions")
+            (r'terms?\s+of\s+(service|use)', 1.0),
+            (r'terms?\s+(and|&)\s+conditions?', 1.0),
+            # "Website Terms" variation (common on corporate sites)
+            (r'website[-_\s]?terms?', 0.95),
+            # URL path matches
             (r'/terms/?$', 0.9),
             (r'/tos/?$', 0.9),
+            # T&C variations
+            (r't\s*&\s*c', 0.8),
             (r't\&c', 0.8),
         ],
         "shipping_delivery": [
@@ -103,7 +112,9 @@ class PolicyDetector:
             r'privacy[-_]?policy', r'privacy', r'gdpr', r'data[-_]?protection'
         ],
         "terms_condition": [
-            r'terms?[-_]?(and[-_]?|\&[-_]?)?conditions?', r'terms?[-_]?of[-_]?(service|use)', r't\&c', r'tos'
+            r'terms?[-_]?(and[-_]?|\&[-_]?)?conditions?', r'terms?[-_]?of[-_]?(service|use)',
+            r'terms?\s+of\s+(service|use)', r'terms?\s+(and|&)\s+conditions?',
+            r'website[-_\s]?terms?', r't\s*&\s*c', r't\&c', r'tos'
         ],
         "shipping_delivery": [
             r'shipping', r'delivery', r'dispatch'
