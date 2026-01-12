@@ -31,11 +31,28 @@ class MetadataExtractor:
         # Try to extract from footer copyright
         footer = soup.find('footer')
         if footer:
-            copyright = footer.find(string=re.compile(r'©|\(c\)|copyright', re.I))
-            if copyright:
-                match = re.search(r'(?:©|\(c\)|copyright)\s*(?:\d{4})?\s*([A-Z][\w\s&,.-]+)', copyright, re.I)
+            # Get full footer text for more flexible pattern matching
+            footer_text = footer.get_text(separator=' ', strip=True)
+            
+            # V2.2.1: Enhanced patterns to handle various copyright formats
+            # Handles: "© 2025 | Company Name", "© 2025 Company Name", "Copyright 2025 - Company Name"
+            copyright_patterns = [
+                # Pattern with year and optional separator (| , - or nothing)
+                r'(?:©|\(c\)|copyright)\s*\d{4}\s*(?:[-|–]?\s*)?([A-Z][A-Za-z0-9\s&,.\'-]+?)(?:\s*\.\s*All|\s*All\s*Rights|$)',
+                # Pattern without year
+                r'(?:©|\(c\)|copyright)\s+([A-Z][A-Za-z0-9\s&,.\'-]+?)(?:\s*\.\s*All|\s*All\s*Rights|$)',
+                # Descriptive pattern: "Company Name is a ..." 
+                r'^([A-Z][A-Za-z0-9\s&.\'-]+(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Ltd\.?|Inc\.?|LLC))\s+is\s+',
+            ]
+            
+            for pattern in copyright_patterns:
+                match = re.search(pattern, footer_text, re.IGNORECASE | re.MULTILINE)
                 if match:
                     business_name = match.group(1).strip()
+                    # Clean up trailing punctuation
+                    business_name = re.sub(r'\s*[.|,]\s*$', '', business_name)
+                    if len(business_name) >= 3:
+                        break
         
         # Fallback: Check title
         if not business_name and soup.title:

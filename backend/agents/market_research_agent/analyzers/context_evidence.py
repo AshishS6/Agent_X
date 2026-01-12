@@ -62,6 +62,23 @@ class EvidenceCollector:
                 final_path = home_page.final_url.lower()
                 if any(x in final_path for x in ['/login', '/signin', '/auth', 'account']):
                     auth_gated = True
+        
+        # V2.2.1: Detect e-commerce URL patterns from discovered pages
+        ecommerce_url_patterns = False
+        found_page_types = page_graph.get_found_page_types() if hasattr(page_graph, 'get_found_page_types') else []
+        
+        # Check for e-commerce indicators in page types
+        ecommerce_page_types = {'product', 'shop', 'cart', 'checkout', 'basket', 'order'}
+        if ecommerce_page_types & set(found_page_types):
+            ecommerce_url_patterns = True
+        
+        # Also check URL patterns in discovered pages
+        if hasattr(page_graph, 'pages'):
+            for url in page_graph.pages.keys():
+                url_lower = url.lower()
+                if any(pattern in url_lower for pattern in ['/product/', '/shop/', '/cart/', '/basket/', '/checkout/', '/wc-', 'woocommerce']):
+                    ecommerce_url_patterns = True
+                    break
 
         return {
             "pages_fetched": page_graph.metadata.pages_fetched,
@@ -69,7 +86,8 @@ class EvidenceCollector:
             "auth_gated": auth_gated,
             "blocked": home_page and home_page.status == 403,
             "has_robots_txt": page_graph.metadata.robots_checked,
-            "sitemap_found": page_graph.metadata.sitemap_found
+            "sitemap_found": page_graph.metadata.sitemap_found,
+            "ecommerce_url_patterns": ecommerce_url_patterns  # V2.2.1: URL-based detection
         }
 
     def _collect_content_signals(self, page_text: str) -> Dict[str, Any]:
@@ -80,26 +98,35 @@ class EvidenceCollector:
         text = page_text.lower()
         
         # Keyword Lists
+        # V2.2.1: Separated fintech keywords into core (actual fintech business) and 
+        # payment_methods (mentions of payment options, normal for any e-commerce)
         patterns = {
             "developer_docs": ['api reference', 'sdk', 'documentation', 'developer guide', 'git clone', 'npm install'],
             "blockchain_specific": ['validator', 'consensus', 'tokenomics', 'smart contract', 'faucet', 'mainnet', 'testnet', 'rpc endpoint'],
             "blockchain_generic": ['blockchain', 'crypto', 'web3', 'decentralized', 'protocol'],
-            "fintech": [
-                # Banking & Finance
+            # V2.2.1: Core fintech keywords - actual financial service providers
+            "fintech_core": [
+                # Banking & Finance - actual financial services
                 'banking', 'wealth management', 'insurance', 'loans', 'credit card', 'investing', 'brokerage',
-                # Payment Infrastructure - Critical for payment gateways like Razorpay/Stripe
-                'payment gateway', 'payment processing', 'payment api', 'payment solution', 'payment infrastructure',
-                'upi', 'netbanking', 'neft', 'rtgs', 'imps', 'emi', 'recurring payments', 'subscription billing',
-                'merchant', 'payout', 'settlement', 'refund', 'chargeback', 'pci dss', 'pci compliant',
-                'acquire', 'issuer', 'card processing', 'payment link', 'payment button', 'checkout api',
-                # Razorpay/Stripe specific patterns
-                'razorpay', 'stripe', 'paypal', 'paytm', 'phonepe', 'gpay', 'bharat qr',
-                'escrow', 'split payment', 'marketplace payout', 'instant settlement',
+                'mutual fund', 'stock trading', 'demat account', 'fixed deposit', 'savings account',
+                # Payment Infrastructure - for companies that BUILD payment infra
+                'payment gateway', 'payment processing', 'payment api', 'payment infrastructure',
+                'acquire', 'issuer', 'card processing', 'checkout api',
                 # Financial Services
-                'kyc', 'aml', 'compliance', 'forex', 'currency exchange', 'remittance', 'wire transfer'
+                'aml', 'forex', 'currency exchange', 'remittance', 'wire transfer',
+                'lending', 'credit score', 'loan application', 'fico',
+            ],
+            # V2.2.1: Payment method keywords - common on ANY e-commerce site
+            # These should NOT count as fintech signals for classification
+            "payment_methods": [
+                'upi', 'netbanking', 'neft', 'rtgs', 'imps', 'emi', 
+                'razorpay', 'stripe', 'paypal', 'paytm', 'phonepe', 'gpay', 'bharat qr',
+                'payout', 'settlement', 'refund', 'chargeback', 'merchant',
+                'recurring payments', 'subscription billing', 'pci dss', 'pci compliant',
+                'escrow', 'split payment', 'payment link', 'payment button',
             ],
             "saas": ['dashboard', 'sign up', 'log in', 'pricing', 'subscription', 'software', 'platform'],
-            "ecommerce": ['add to cart', 'checkout', 'shipping', 'store', 'shop now', 'buy now'],
+            "ecommerce": ['add to cart', 'checkout', 'shipping', 'store', 'shop now', 'buy now', 'order now', 'purchase'],
             "content": ['blog', 'news', 'article', 'editorial', 'subscribe to newsletter', 'read more']
         }
         
@@ -117,12 +144,32 @@ class EvidenceCollector:
 
     def _collect_structure_signals(self, product_indicators: Dict[str, Any], page_text: str) -> Dict[str, Any]:
         """Collect structural signals like cart, login, pricing"""
+        text_lower = page_text[:10000].lower()
+        
+        # V2.2.1: Enhanced cart detection - "basket" is common in UK/EU sites
+        has_cart = (
+            product_indicators.get('has_cart', False) or 
+            'cart' in text_lower or 
+            'basket' in text_lower or
+            'add to cart' in text_lower or
+            'add to basket' in text_lower or
+            'shopping bag' in text_lower
+        )
+        
+        # V2.2.1: Enhanced checkout detection
+        has_checkout = (
+            product_indicators.get('has_checkout', False) or
+            'checkout' in text_lower or
+            'proceed to checkout' in text_lower or
+            'place order' in text_lower
+        )
+        
         return {
-            "has_cart": product_indicators.get('has_cart', False) or 'cart' in page_text[:5000],
-            "has_checkout": product_indicators.get('has_checkout', False),
+            "has_cart": has_cart,
+            "has_checkout": has_checkout,
             "pricing_model": product_indicators.get('pricing_model'),
             "has_pricing_page": product_indicators.get('source_pages', {}).get('pricing_page') is not None,
-            "login_detected": "login" in page_text[:2000] or "sign in" in page_text[:2000]
+            "login_detected": "login" in text_lower or "sign in" in text_lower or "my-account" in text_lower
         }
 
     def _collect_tech_signals(self, tech_stack: Dict[str, Any]) -> Dict[str, Any]:
@@ -133,11 +180,15 @@ class EvidenceCollector:
         tech_names = [t.get('name', '').lower() for t in tech_stack.get('technologies', [])]
         categories = [c.get('slug', '') for t in tech_stack.get('technologies', []) for c in t.get('categories', [])]
         
+        # V2.2.1: Extended e-commerce platform list
+        ecommerce_keywords = ['shopify', 'woocommerce', 'magento', 'bigcommerce', 'prestashop', 
+                             'opencart', 'squarespace commerce', 'ecwid', 'volusion']
+        
         return {
-            "ecommerce_platforms": [t for t in tech_names if t in ['shopify', 'woocommerce', 'magento', 'bigcommerce']],
-            "payment_processors": [t for t in tech_names if t in ['stripe', 'paypal', 'braintree', 'adyen']],
-            "cms": [t for t in tech_names if t in ['wordpress', 'ghost', 'drupal']],
-            "frontend_frameworks": [t for t in tech_names if t in ['react', 'vue', 'angular', 'next.js']],
+            "ecommerce_platforms": [t for t in tech_names if any(ec in t for ec in ecommerce_keywords)],
+            "payment_processors": [t for t in tech_names if t in ['stripe', 'paypal', 'braintree', 'adyen', 'razorpay']],
+            "cms": [t for t in tech_names if t in ['wordpress', 'ghost', 'drupal', 'joomla']],
+            "frontend_frameworks": [t for t in tech_names if t in ['react', 'vue', 'angular', 'next.js', 'nuxt']],
             "analytics": [t for t in tech_names if t in ['google analytics', 'segment', 'mixpanel']]
         }
 

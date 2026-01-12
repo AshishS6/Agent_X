@@ -583,14 +583,32 @@ class DecisionRules:
         detected_type = business_context.get('primary', 'UNKNOWN') if isinstance(business_context, dict) else 'UNKNOWN'
         
         # Check for business type mismatch
+        # V2.2.1: Updated to match actual classifier output values (with suffixes)
+        # Classifier outputs: ECOMMERCE_MERCHANT, SAAS_PRODUCT, FINTECH_INFRASTRUCTURE, 
+        # MARKETPLACE, BLOCKCHAIN_INFRASTRUCTURE, CONTENT_MEDIA, DEVELOPER_PLATFORM, UNKNOWN
         type_mapping = {
-            'E-COMMERCE': ['ECOMMERCE', 'RETAIL'],
-            'ECOMMERCE': ['ECOMMERCE', 'RETAIL'],
-            'SAAS': ['SAAS', 'SOFTWARE'],
-            'SOFTWARE': ['SAAS', 'SOFTWARE'],
-            'FINTECH': ['FINTECH', 'FINANCIAL'],
-            'FINANCIAL': ['FINTECH', 'FINANCIAL'],
-            'RETAIL': ['ECOMMERCE', 'RETAIL'],
+            # E-commerce variations
+            'E-COMMERCE': ['ECOMMERCE_MERCHANT', 'ECOMMERCE', 'RETAIL', 'MARKETPLACE'],
+            'ECOMMERCE': ['ECOMMERCE_MERCHANT', 'ECOMMERCE', 'RETAIL', 'MARKETPLACE'],
+            'RETAIL': ['ECOMMERCE_MERCHANT', 'ECOMMERCE', 'RETAIL', 'MARKETPLACE'],
+            'MARKETPLACE': ['ECOMMERCE_MERCHANT', 'MARKETPLACE', 'RETAIL'],
+            # SaaS variations
+            'SAAS': ['SAAS_PRODUCT', 'SAAS', 'SOFTWARE', 'DEVELOPER_PLATFORM'],
+            'SOFTWARE': ['SAAS_PRODUCT', 'SAAS', 'SOFTWARE', 'DEVELOPER_PLATFORM'],
+            # Fintech variations
+            'FINTECH': ['FINTECH_INFRASTRUCTURE', 'FINTECH', 'FINANCIAL'],
+            'FINANCIAL': ['FINTECH_INFRASTRUCTURE', 'FINTECH', 'FINANCIAL'],
+            'PAYMENT_GATEWAY': ['FINTECH_INFRASTRUCTURE', 'FINTECH'],
+            # Blockchain variations
+            'BLOCKCHAIN': ['BLOCKCHAIN_INFRASTRUCTURE', 'BLOCKCHAIN', 'CRYPTO'],
+            'CRYPTO': ['BLOCKCHAIN_INFRASTRUCTURE', 'BLOCKCHAIN', 'CRYPTO'],
+            # Content variations
+            'CONTENT': ['CONTENT_MEDIA', 'CONTENT'],
+            'MEDIA': ['CONTENT_MEDIA', 'CONTENT'],
+            'BLOG': ['CONTENT_MEDIA', 'CONTENT'],
+            # Developer platform
+            'DEVELOPER': ['DEVELOPER_PLATFORM', 'SAAS_PRODUCT'],
+            'API': ['DEVELOPER_PLATFORM', 'SAAS_PRODUCT'],
         }
         
         allowed_types = type_mapping.get(declared_type, [declared_type])

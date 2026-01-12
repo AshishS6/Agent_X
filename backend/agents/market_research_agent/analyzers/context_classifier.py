@@ -123,10 +123,21 @@ class BusinessContextClassifier:
         struct = evidence['structure']
         
         # --- E-Commerce Signals ---
-        if tech.get('ecommerce_platforms'): scores[self.CONTEXT_ECOMMERCE] += 5
-        if struct.get('has_cart'): scores[self.CONTEXT_ECOMMERCE] += 3
-        if struct.get('has_checkout'): scores[self.CONTEXT_ECOMMERCE] += 2
-        if hits.get('ecommerce'): scores[self.CONTEXT_ECOMMERCE] += 1
+        # V2.2.1: Increased weights for e-commerce detection
+        crawl = evidence['crawl']
+        has_ecommerce_platform = bool(tech.get('ecommerce_platforms'))
+        has_ecommerce_urls = crawl.get('ecommerce_url_patterns', False)
+        
+        if has_ecommerce_platform: 
+            scores[self.CONTEXT_ECOMMERCE] += 8  # V2.2.1: Strong signal - platform is definitive
+        if has_ecommerce_urls:
+            scores[self.CONTEXT_ECOMMERCE] += 6  # V2.2.1: /product/, /shop/, /cart/ URLs are strong signals
+        if struct.get('has_cart'): 
+            scores[self.CONTEXT_ECOMMERCE] += 4  # V2.2.1: Increased weight
+        if struct.get('has_checkout'): 
+            scores[self.CONTEXT_ECOMMERCE] += 3  # V2.2.1: Increased weight
+        if hits.get('ecommerce'): 
+            scores[self.CONTEXT_ECOMMERCE] += min(len(hits['ecommerce']), 3)  # V2.2.1: Multiple hits = stronger signal
         
         # --- SaaS Signals ---
         if hits.get('saas'): scores[self.CONTEXT_SAAS] += 2
@@ -135,16 +146,23 @@ class BusinessContextClassifier:
         if tech.get('analytics'): scores[self.CONTEXT_SAAS] += 0.5
         
         # --- Fintech Signals ---
-        if hits.get('fintech'): 
-            # More generous scoring - payment gateways have many fintech keywords
-            num_hits = len(hits['fintech'])
-            scores[self.CONTEXT_FINTECH] += min(num_hits * 1.0, 8)  # Cap at 8 points
-            # Extra boost for payment-specific keywords (strong signal)
-            payment_keywords = {'payment gateway', 'payment processing', 'payment api', 'merchant', 
-                              'payout', 'settlement', 'pci', 'razorpay', 'stripe', 'upi', 'netbanking'}
-            payment_hits = len([k for k in hits['fintech'] if any(pk in k for pk in payment_keywords)])
-            if payment_hits >= 2:
+        # V2.2.1: Only use fintech_core keywords - payment_methods are common on any e-commerce site
+        if hits.get('fintech_core'): 
+            num_hits = len(hits['fintech_core'])
+            scores[self.CONTEXT_FINTECH] += min(num_hits * 2.0, 8)  # Cap at 8 points
+            # Strong fintech signals (actual financial services)
+            strong_fintech = {'banking', 'loans', 'investing', 'brokerage', 'insurance', 
+                             'payment gateway', 'payment api', 'lending', 'credit score'}
+            strong_hits = len([k for k in hits['fintech_core'] if any(pk in k for pk in strong_fintech)])
+            if strong_hits >= 2:
                 scores[self.CONTEXT_FINTECH] += 3  # Strong fintech signal
+        
+        # V2.2.1: If e-commerce platform detected, payment_methods are expected and should NOT boost fintech
+        # Only add minor fintech points for payment_methods if NO e-commerce platform detected
+        if hits.get('payment_methods') and not has_ecommerce_platform:
+            # Only a small boost - these could still be an e-commerce site without detected platform
+            scores[self.CONTEXT_FINTECH] += min(len(hits['payment_methods']) * 0.5, 2)
+        
         if evidence['mcc'].get('description') and 'financial' in evidence['mcc']['description'].lower():
             scores[self.CONTEXT_FINTECH] += 4
         
@@ -170,10 +188,23 @@ class BusinessContextClassifier:
              if scores[self.CONTEXT_SAAS] > 0: scores[self.CONTEXT_SAAS] -= 2
              if scores[self.CONTEXT_DEV] > 0: scores[self.CONTEXT_DEV] -= 2
              
-        # Trump Rule: E-commerce Platform is definitive
-        if tech.get('ecommerce_platforms'):
-             # Boost E-com
-             scores[self.CONTEXT_ECOMMERCE] += 2
+        # V2.2.1: Trump Rule: E-commerce signals should suppress fintech false positives
+        # If we detect cart + checkout OR e-commerce platform OR e-commerce URLs, this is clearly a store
+        is_ecommerce_site = (
+            has_ecommerce_platform or 
+            has_ecommerce_urls or 
+            (struct.get('has_cart') and struct.get('has_checkout')) or
+            (struct.get('has_cart') and hits.get('ecommerce'))
+        )
+        
+        if is_ecommerce_site:
+            # Suppress fintech score - payment mentions are expected on e-commerce sites
+            if scores[self.CONTEXT_FINTECH] > 0 and not hits.get('fintech_core'):
+                # No core fintech keywords, just payment_methods - definitely not a fintech company
+                scores[self.CONTEXT_FINTECH] = 0
+            elif scores[self.CONTEXT_FINTECH] > 0:
+                # Has some fintech_core keywords, but e-commerce is strong - reduce fintech
+                scores[self.CONTEXT_FINTECH] = max(0, scores[self.CONTEXT_FINTECH] - 6)
         
         return scores
 

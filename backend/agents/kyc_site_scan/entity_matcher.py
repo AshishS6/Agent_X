@@ -84,11 +84,43 @@ class EntityMatcher:
     ]
     
     # Patterns for extracting legal names
+    # V2.2.1: Enhanced patterns to handle various copyright formats
+    # Including: "© 2025 | Company Name", "© 2025 Company Name", "© Company Name"
     COPYRIGHT_PATTERNS = [
-        r'©\s*(?:\d{4}\s*[-–]?\s*)?(?:\d{4}\s+)?([A-Z][A-Za-z0-9\s&,.\'-]+?)(?:\.|,|\s*All\s*Rights|\s*$)',
-        r'\(c\)\s*(?:\d{4}\s*[-–]?\s*)?(?:\d{4}\s+)?([A-Z][A-Za-z0-9\s&,.\'-]+?)(?:\.|,|\s*All\s*Rights|\s*$)',
-        r'[Cc]opyright\s*(?:©|\(c\))?\s*(?:\d{4}\s*[-–]?\s*)?(?:\d{4}\s+)?([A-Z][A-Za-z0-9\s&,.\'-]+?)(?:\.|,|\s*All\s*Rights|\s*$)',
+        # With year and optional separator (|, -, –, or whitespace)
+        # Greedy capture for company name, terminated by ". All" or "All Rights"
+        r'©\s*\d{4}\s*[-|–]?\s*([A-Z][A-Za-z0-9\s&,\'-]+(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP)?)\s*\.?\s*(?:All\s*[Rr]ights|$)',
+        r'\(c\)\s*\d{4}\s*[-|–]?\s*([A-Z][A-Za-z0-9\s&,\'-]+(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP)?)\s*\.?\s*(?:All\s*[Rr]ights|$)',
+        r'[Cc]opyright\s*(?:©|\(c\))?\s*\d{4}\s*[-|–]?\s*([A-Z][A-Za-z0-9\s&,\'-]+(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP)?)\s*\.?\s*(?:All\s*[Rr]ights|$)',
+        # Without year
+        r'©\s+([A-Z][A-Za-z0-9\s&,\'-]+(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP)?)\s*\.?\s*(?:All\s*[Rr]ights|$)',
     ]
+    
+    # V2.2.1: Descriptive patterns for "Company Name is a ..." - separate for clarity
+    # NOTE: These patterns are used with re.IGNORECASE, so [A-Z] becomes [a-zA-Z]
+    # We need word boundaries to avoid capturing prefix words like "us", "at", "about"
+    DESCRIPTIVE_PATTERNS = [
+        # "Company Private Limited is a ..." pattern
+        # Use word boundary \b and require the company name to start after certain delimiters
+        r'(?:^|[.\n])\s*([A-Z][A-Za-z0-9\s&.\'-]*(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))\s+is\s+(?:a|an|the|your)\s+',
+        # "At Company Name, we..." pattern
+        r'(?:^|[.\n])\s*(?:At\s+)?([A-Z][A-Za-z0-9\s&.\'-]*(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))\s*,\s*we\s+',
+        # "Welcome to Company Name" pattern
+        r'(?:Welcome\s+to|Visit)\s+([A-Z][A-Za-z0-9\s&.\'-]+(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))',
+        # V2.2.2: "Operated by COMPANY NAME" pattern (common on about pages)
+        r'[Oo]perated\s+by\s+([A-Z][A-Za-z0-9\s&.\'-]*(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))',
+        # "Owned by COMPANY NAME" pattern
+        r'[Oo]wned\s+by\s+([A-Z][A-Za-z0-9\s&.\'-]*(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))',
+        # "Run by COMPANY NAME" pattern
+        r'[Rr]un\s+by\s+([A-Z][A-Za-z0-9\s&.\'-]*(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))',
+        # "A venture of COMPANY NAME" pattern
+        r'[Aa]\s+(?:venture|unit|division|subsidiary)\s+of\s+([A-Z][A-Za-z0-9\s&.\'-]*(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))',
+        # "COMPANY NAME, a registered" pattern
+        r'([A-Z][A-Za-z0-9\s&.\'-]*(?:Private\s+Limited|Pvt\.?\s*Ltd\.?|Limited|Ltd\.?|Inc\.?|LLC|LLP))\s*,\s*a\s+registered',
+    ]
+    
+    # Words that should NOT be part of company names (prefix noise)
+    NOISE_PREFIXES = {'us', 'at', 'about', 'the', 'a', 'an', 'our', 'your', 'their', 'by', 'for', 'to', 'from', 'with'}
     
     # Patterns for extracting addresses
     ADDRESS_PATTERNS = [
@@ -189,7 +221,7 @@ class EntityMatcher:
             if title_parts:
                 names.append(title_parts[0].strip())
         
-        # 4. Search page content for copyright notices
+        # 4. Search page content for copyright notices and descriptive patterns
         crawl_summary = scan_data.get('crawl_summary', {})
         page_texts = crawl_summary.get('page_texts', {})
         
@@ -199,6 +231,16 @@ class EntityMatcher:
             
             # Search for copyright patterns
             for pattern in self.COPYRIGHT_PATTERNS:
+                matches = re.findall(pattern, page_text, re.IGNORECASE | re.MULTILINE)
+                for match in matches:
+                    clean_name = match.strip()
+                    # Remove trailing punctuation
+                    clean_name = re.sub(r'\s*[.|,]\s*$', '', clean_name)
+                    if len(clean_name) >= 3 and clean_name not in names:
+                        names.append(clean_name)
+            
+            # V2.2.1: Also look for "Company Name is a..." pattern (common in footers/about sections)
+            for pattern in self.DESCRIPTIVE_PATTERNS:
                 matches = re.findall(pattern, page_text, re.IGNORECASE)
                 for match in matches:
                     clean_name = match.strip()
@@ -209,6 +251,14 @@ class EntityMatcher:
         footer_text = scan_data.get('footer_text', '')
         if footer_text:
             for pattern in self.COPYRIGHT_PATTERNS:
+                matches = re.findall(pattern, footer_text, re.IGNORECASE)
+                for match in matches:
+                    clean_name = match.strip()
+                    clean_name = re.sub(r'\s*[.|,]\s*$', '', clean_name)
+                    if len(clean_name) >= 3 and clean_name not in names:
+                        names.append(clean_name)
+            # Also check descriptive patterns in footer
+            for pattern in self.DESCRIPTIVE_PATTERNS:
                 matches = re.findall(pattern, footer_text, re.IGNORECASE)
                 for match in matches:
                     clean_name = match.strip()
@@ -345,6 +395,18 @@ class EntityMatcher:
         
         return None, 0.0, {'reason': 'Matching failed'}
     
+    # V2.2.1: Placeholder values that indicate no address was provided
+    ADDRESS_PLACEHOLDER_VALUES = {
+        'address not provided',
+        'not provided',
+        'n/a',
+        'na',
+        'none',
+        'test address',
+        'address',
+        '',
+    }
+    
     def _match_address(
         self,
         declared: str,
@@ -352,6 +414,16 @@ class EntityMatcher:
     ) -> Optional[Dict[str, Any]]:
         """Match declared address against extracted addresses"""
         if not extracted or not declared:
+            return None
+        
+        # V2.2.1: Skip address matching if declared address is a placeholder
+        # This prevents false ADDRESS_MISMATCH when user doesn't provide an address
+        declared_lower = declared.lower().strip()
+        if declared_lower in self.ADDRESS_PLACEHOLDER_VALUES:
+            return None
+        
+        # Also check for common placeholder patterns
+        if len(declared_lower) < 15 or declared_lower.startswith('test'):
             return None
         
         declared_normalized = self._normalize_address(declared)
@@ -459,26 +531,56 @@ class EntityMatcher:
         # Remove leading/trailing whitespace
         cleaned = name.strip()
         
+        # V2.2.1: Remove common noise prefixes like "us", "at", "about"
+        # These get captured when pattern matches text like "About us COMPANY NAME is..."
+        words = cleaned.split()
+        while words and words[0].lower() in self.NOISE_PREFIXES:
+            words.pop(0)
+        if not words:
+            return None
+        cleaned = ' '.join(words)
+        
         # Remove "All Rights Reserved" etc.
         cleaned = re.sub(r'\s*All\s+Rights\s+Reserved.*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\d{4}\s*[-–]?\s*\d{4}', '', cleaned)  # Remove year ranges
         
-        # Remove if too short or too long
-        if len(cleaned) < 3 or len(cleaned) > 100:
+        # V2.2.1: Remove if too short (5 chars min for meaningful company name) or too long
+        if len(cleaned) < 5 or len(cleaned) > 100:
+            return None
+        
+        # V2.2.1: Single-word names without legal suffixes are likely incomplete/false positives
+        # Valid: "CELESTIA INNO PRIVATE LIMITED", "TechCorp Inc"
+        # Invalid: "CELESTIA" alone (likely a brand name, not legal entity)
+        words = cleaned.split()
+        legal_suffixes = {'ltd', 'limited', 'inc', 'llc', 'llp', 'corp', 'corporation', 
+                         'pvt', 'private', 'company', 'co', 'gmbh', 'sa', 'ag'}
+        has_legal_suffix = any(w.lower().rstrip('.') in legal_suffixes for w in words)
+        
+        if len(words) == 1 and not has_legal_suffix:
+            # Single word without legal suffix - too ambiguous to be a legal entity name
             return None
         
         # Remove if it's just numbers or common words
         if re.match(r'^[\d\s]+$', cleaned):
             return None
         
-        common_words = ['home', 'about', 'contact', 'privacy', 'terms', 'blog', 'news']
+        # V2.2.1: Expanded list of common false positive words
+        common_words = ['home', 'about', 'contact', 'privacy', 'terms', 'blog', 'news',
+                       'shop', 'store', 'products', 'services', 'solutions', 'welcome',
+                       'copyright', 'reserved', 'rights', 'policy', 'legal']
         if cleaned.lower() in common_words:
             return None
         
         return cleaned.strip()
     
     def _basic_similarity(self, s1: str, s2: str) -> float:
-        """Basic string similarity when rapidfuzz is not available"""
+        """
+        Basic string similarity when rapidfuzz is not available.
+        
+        V2.2.1: Enhanced to penalize:
+        - Single word matches (not meaningful for company names)
+        - Large word count differences (likely unrelated entities)
+        """
         if not s1 or not s2:
             return 0.0
         
@@ -492,7 +594,21 @@ class EntityMatcher:
         intersection = words1 & words2
         union = words1 | words2
         
-        # Jaccard similarity * 100
+        # V2.2.1: Single word matches are not meaningful for company names
+        # e.g., "CELESTIA" matching "CELESTIA INNO PRIVATE LIMITED" should score low
+        if len(intersection) == 1 and (len(words1) > 2 or len(words2) > 2):
+            # Only 1 word matches but one side has 3+ words - likely coincidental
+            return 20.0  # Low score, will be MISMATCH
+        
+        # V2.2.1: Penalize if word counts are very different
+        # e.g., extracted "CELESTIA" (1 word) vs declared "CELESTIA INNO PRIVATE LIMITED" (4 words)
+        len_ratio = min(len(words1), len(words2)) / max(len(words1), len(words2))
+        if len_ratio < 0.5:
+            # One side has less than half the words of the other - penalize
+            base_jaccard = (len(intersection) / len(union)) * 100
+            return base_jaccard * len_ratio  # Heavily penalized
+        
+        # Standard Jaccard similarity * 100
         return (len(intersection) / len(union)) * 100
     
     def _get_extraction_sources(self, scan_data: Dict[str, Any]) -> List[str]:

@@ -218,7 +218,15 @@ class NormalizedPageGraph:
         early exit reason, robots.txt respected, sitemap used.
         
         Per PRD V2.1.1: Must answer "Why didn't it find X?" from UI alone.
+        V2.2.1: Added page_texts for entity matching and content analysis.
         """
+        # V2.2.1: Collect page texts for entity matching (EntityMatcher needs this)
+        page_texts = {}
+        for page_type, page in self.pages.items():
+            if isinstance(page, PageData) and page.status == 200 and page.visible_text:
+                # Use final_url as key for consistency
+                page_texts[page.final_url] = page.visible_text
+        
         return {
             "pages_discovered": self.metadata.pages_discovered,
             "pages_fetched": self.metadata.pages_fetched,
@@ -233,7 +241,9 @@ class NormalizedPageGraph:
             "robots_checked": self.metadata.robots_checked,
             "sitemap_found": self.metadata.sitemap_found,
             "sitemap_urls_count": self.metadata.sitemap_urls_count,
-            "errors": self.metadata.errors  # Per PRD: Show what went wrong
+            "errors": self.metadata.errors,  # Per PRD: Show what went wrong
+            # V2.2.1: Page texts for entity matching and content analysis
+            "page_texts": page_texts
         }
     
     def to_dict(self) -> Dict:
