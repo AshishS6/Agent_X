@@ -116,12 +116,72 @@ class OllamaClient:
             logger.error(f"Error fetching models: {e}", exc_info=True)
             return []
 
+    async def generate(
+        self,
+        model: str,
+        prompt: str,
+        stream: bool = False
+    ):
+        """
+        Generate text completion using Ollama /api/generate endpoint
+        
+        This endpoint works with all Ollama models, unlike /api/chat which
+        only works with chat-enabled models.
+        
+        Args:
+            model: Model name
+            prompt: Full prompt text
+            stream: If True, returns async iterator. If False, returns complete response string.
+        
+        Returns:
+            If stream=False: str - Complete response text
+            If stream=True: AsyncIterator[str] - JSON lines
+        """
+        # Use longer timeout client for generate
+        generate_client = httpx.AsyncClient(timeout=self.streaming_timeout)
+        
+        try:
+            response = await generate_client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": stream
+                }
+            )
+            response.raise_for_status()
+            
+            if stream:
+                # Return async iterator for streaming
+                async def stream_generator():
+                    try:
+                        async for line in response.aiter_lines():
+                            if line:
+                                yield line
+                    finally:
+                        await generate_client.aclose()
+                return stream_generator()
+            else:
+                # Return complete response
+                data = response.json()
+                result = data.get("response", "")
+                await generate_client.aclose()
+                return result
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout generating text: {e}", exc_info=True)
+            await generate_client.aclose()
+            raise Exception("Request timed out. Large models may take several minutes to respond.")
+        except Exception as e:
+            logger.error(f"Error generating text: {e}", exc_info=True)
+            await generate_client.aclose()
+            raise
+
     async def chat_stream(
         self, 
         model: str, 
         messages: List[Dict[str, str]]
     ) -> AsyncIterator[str]:
-        """Stream chat responses from Ollama"""
+        """Stream chat responses from Ollama (only works with chat-enabled models)"""
         # Create a client with longer timeout for streaming
         # Don't use context manager - let it be cleaned up when generator completes
         streaming_client = httpx.AsyncClient(timeout=self.streaming_timeout)

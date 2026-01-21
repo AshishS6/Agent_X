@@ -19,7 +19,7 @@ class FintechAssistant:
     """
     
     @staticmethod
-    def get_config(model: str = "qwen2.5:7b") -> AssistantConfig:
+    def get_config(model: str = "qwen2.5:7b-instruct") -> AssistantConfig:
         """
         Get fintech assistant configuration
         

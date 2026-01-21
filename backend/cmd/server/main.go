@@ -74,6 +74,7 @@ func main() {
 	monitoringHandler := handlers.NewMonitoringHandler(executor)
 	toolsHandler := handlers.NewToolsHandler()
 	mccHandler := handlers.NewMccHandler()
+	assistantsHandler := handlers.NewAssistantsHandler(projectRoot)
 
 	// Initialize MCC Tables & Seed Data
 	if err := models.InitMccTables(); err != nil {
@@ -147,6 +148,12 @@ func main() {
 			monitoring.GET("/system", monitoringHandler.System)
 			monitoring.GET("/proxy", monitoringHandler.Proxy)
 		}
+
+		// Assistants routes
+		assistants := api.Group("/assistants")
+		{
+			assistants.POST("/:name/chat", assistantsHandler.Chat)
+		}
 	}
 
 	// Graceful shutdown
@@ -167,11 +174,12 @@ func main() {
 	log.Printf("🌐 CORS enabled for: %v", cfg.CORSOrigins)
 	log.Println("")
 	log.Println("📍 API Documentation:")
-	log.Printf("   - Health: http://localhost:%s/api/monitoring/health", cfg.Port)
-	log.Printf("   - Agents: http://localhost:%s/api/agents", cfg.Port)
-	log.Printf("   - Tasks:  http://localhost:%s/api/tasks", cfg.Port)
-	log.Printf("   - Tools:  http://localhost:%s/api/tools", cfg.Port)
-	log.Printf("   - MCCs:   http://localhost:%s/api/mccs", cfg.Port)
+	log.Printf("   - Health:     http://localhost:%s/api/monitoring/health", cfg.Port)
+	log.Printf("   - Agents:     http://localhost:%s/api/agents", cfg.Port)
+	log.Printf("   - Tasks:      http://localhost:%s/api/tasks", cfg.Port)
+	log.Printf("   - Tools:      http://localhost:%s/api/tools", cfg.Port)
+	log.Printf("   - MCCs:       http://localhost:%s/api/mccs", cfg.Port)
+	log.Printf("   - Assistants: http://localhost:%s/api/assistants/:name/chat", cfg.Port)
 	log.Println("")
 
 	if err := router.Run(addr); err != nil {
