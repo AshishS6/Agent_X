@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { MonitoringService, SystemMetrics, Task } from '../services/api';
-import ChatWidget from '../components/Chat/ChatWidget';
 
 // --- Components ---
 
@@ -298,7 +297,6 @@ const DashboardHome = () => {
                 </div>
 
             </div>
-            <ChatWidget />
         </div>
     );
 };

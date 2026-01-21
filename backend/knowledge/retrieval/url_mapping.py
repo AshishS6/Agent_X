@@ -211,12 +211,14 @@ class URLMapper:
         """
         Extract and validate public URLs from context
         
+        Only returns public website/documentation URLs. Internal KB markdown files are filtered out.
+        
         Args:
             context: Context text
             source_paths: List of source paths from retrieved chunks
             
         Returns:
-            Set of valid public URLs
+            Set of valid public URLs (no internal KB files)
         """
         public_urls = set()
         
@@ -228,16 +230,19 @@ class URLMapper:
             # Clean URL
             clean_url = url.rstrip('.,;:!?)')
             
-            # Validate it's a public URL
+            # STRICT: Validate it's a public URL (filters out .md files)
             if cls._is_valid_public_url(clean_url):
                 public_urls.add(clean_url)
         
-        # Add URLs from source path mapping
+        # Add URLs from source path mapping (these should already be public URLs)
         if source_paths:
             for source_path in source_paths:
-                mapped_url = cls.get_url_for_source_path(source_path)
-                if mapped_url:
-                    public_urls.add(mapped_url)
+                # Skip if source_path looks like an internal file path
+                if source_path and (source_path.endswith('.md') or '/' in source_path):
+                    # Map to public URL
+                    mapped_url = cls.get_url_for_source_path(source_path)
+                    if mapped_url and cls._is_valid_public_url(mapped_url):
+                        public_urls.add(mapped_url)
         
         # Extract API endpoints and map them
         endpoint_pattern = r'(?:POST|GET|PUT|DELETE|PATCH)\s+[^\s\)\]\>]+'
@@ -245,10 +250,35 @@ class URLMapper:
         
         for endpoint in endpoints:
             mapped_url = cls.get_url_for_api_endpoint(endpoint)
-            if mapped_url:
+            if mapped_url and cls._is_valid_public_url(mapped_url):
                 public_urls.add(mapped_url)
         
-        return public_urls
+        # Final filter: Remove any URLs that contain .md or look like internal file paths
+        filtered_urls = set()
+        for url in public_urls:
+            url_lower = url.lower()
+            
+            # STRICT: Exclude any URL containing .md (markdown files are internal KB files)
+            if '.md' in url_lower:
+                continue
+            
+            # Exclude URLs that look like file paths (e.g., /api/00_introduction.md, /api/15_layer_js.md)
+            if re.search(r'/\d+_[^/]+\.md', url_lower):
+                continue
+            
+            # Exclude URLs with patterns like /api/XX_filename.md
+            if re.search(r'/api/\d+_[^/]+\.md', url_lower):
+                continue
+            
+            # Exclude URLs ending with .md
+            if url_lower.endswith('.md'):
+                continue
+            
+            # Only include if it's a valid public URL
+            if cls._is_valid_public_url(url):
+                filtered_urls.add(url)
+        
+        return filtered_urls
     
     @classmethod
     def _is_valid_public_url(cls, url: str) -> bool:
@@ -263,6 +293,10 @@ class URLMapper:
         """
         url_lower = url.lower()
         
+        # STRICT: Exclude any URL containing .md (markdown files are internal KB files)
+        if '.md' in url_lower:
+            return False
+        
         # Exclude invalid patterns
         invalid_patterns = [
             'localhost',
@@ -271,13 +305,24 @@ class URLMapper:
             '192.168.',
             '10.0.',
             '172.16.',
-            '.md',  # Exclude markdown file paths
-            '/api/11_api_constants.md',  # Specific invalid URL
-            'api.zwitch.io/v1/api/',  # Invalid API path structure
         ]
         
-        if any(pattern in url_lower for pattern in invalid_patterns):
-            return False
+        # Check for invalid patterns (excluding /api/ which we handle separately)
+        for pattern in invalid_patterns:
+            if pattern in url_lower:
+                return False
+        
+        # Special handling for /api/ paths - exclude file paths but allow documentation URLs
+        if '/api/' in url_lower:
+            # Exclude if it looks like a file path (e.g., /api/00_introduction.md, /api/15_layer_js.md)
+            if re.search(r'/api/\d+_[^/]+\.md', url_lower):
+                return False
+            # Exclude if it's api.zwitch.io/v1/api/ (internal API structure, not public docs)
+            if 'api.zwitch.io/v1/api/' in url_lower:
+                return False
+            # Allow /api/ in documentation URLs (e.g., developers.zwitch.io/docs/api/...)
+            if 'developers.' in url_lower or 'docs' in url_lower:
+                pass  # Continue validation
         
         # Include valid public domains
         valid_domains = [
@@ -288,4 +333,11 @@ class URLMapper:
             'www.',
         ]
         
-        return any(domain in url_lower for domain in valid_domains)
+        # Must contain a valid domain
+        has_valid_domain = any(domain in url_lower for domain in valid_domains)
+        
+        # Additional check: URLs should be proper HTTP/HTTPS URLs
+        if not url_lower.startswith(('http://', 'https://')):
+            return False
+        
+        return has_valid_domain

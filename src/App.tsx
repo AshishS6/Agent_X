@@ -1,6 +1,9 @@
 import { Routes, Route } from 'react-router-dom';
 import DashboardLayout from './components/Layout/DashboardLayout';
 import DashboardHome from './pages/DashboardHome';
+import FintechAssistantPage from './pages/FintechAssistantPage';
+import CodeAssistantPage from './pages/CodeAssistantPage';
+import GeneralAssistantPage from './pages/GeneralAssistantPage';
 import SalesAgent from './pages/SalesAgent';
 import SupportAgent from './pages/SupportAgent';
 import HRAgent from './pages/HRAgent';
@@ -21,6 +24,9 @@ function App() {
     <Routes>
       <Route path="/" element={<DashboardLayout />}>
         <Route index element={<DashboardHome />} />
+        <Route path="assistants/fintech" element={<FintechAssistantPage />} />
+        <Route path="assistants/code" element={<CodeAssistantPage />} />
+        <Route path="assistants/general" element={<GeneralAssistantPage />} />
         <Route path="sales" element={<SalesAgent />} />
         <Route path="support" element={<SupportAgent />} />
         <Route path="hr" element={<HRAgent />} />

@@ -135,15 +135,17 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
             logger.error(f"Ollama generate failed: {e}", exc_info=True)
             raise
         
-        # Step 4: Return structured response
+        # Step 4: Return structured response (LOCKED CONTRACT)
+        # This contract must match ChatResponse in Go handler
         return {
             "assistant": assistant_name,
-            "answer": response_text,
-            "citations": sorted(public_urls),
+            "answer": response_text,  # Required: markdown-formatted answer
+            "citations": sorted(public_urls) if public_urls else [],  # Required: array (never null)
             "metadata": {
                 "model": config.model,
                 "provider": "ollama",
-                "rag_used": config.use_rag and bool(context_text)
+                "rag_used": config.use_rag and bool(context_text),
+                "kb": config.knowledge_base if (config.use_rag and bool(context_text)) else ""
             }
         }
     
@@ -183,12 +185,13 @@ def main():
         logger.error(f"Error running assistant: {e}", exc_info=True)
         error_result = {
             "assistant": input_data.get("assistant", "unknown"),
-            "answer": "",
-            "citations": [],
+            "answer": f"Error: {str(e)}",  # Always provide answer (even if error)
+            "citations": [],  # Required: array (never null)
             "metadata": {
                 "model": "",
                 "provider": "ollama",
                 "rag_used": False,
+                "kb": "",
                 "error": str(e)
             }
         }

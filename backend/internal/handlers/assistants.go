@@ -35,11 +35,21 @@ type ChatRequest struct {
 }
 
 // ChatResponse is the response from assistant chat
+// This contract is LOCKED - do not change without frontend coordination
 type ChatResponse struct {
-	Assistant string                 `json:"assistant"`
-	Answer    string                 `json:"answer"`
-	Citations []string               `json:"citations"`
-	Metadata  map[string]interface{} `json:"metadata"`
+	Assistant string      `json:"assistant"`  // Required: assistant name
+	Answer    string      `json:"answer"`     // Required: markdown-formatted answer
+	Citations []string    `json:"citations"`  // Required: array of public URLs (empty if none)
+	Metadata  ChatMetadata `json:"metadata"`  // Required: structured metadata
+}
+
+// ChatMetadata contains structured metadata about the response
+type ChatMetadata struct {
+	Model     string `json:"model"`      // LLM model used
+	Provider  string `json:"provider"`  // LLM provider (ollama, openai, etc.)
+	RagUsed   bool   `json:"rag_used"`  // Whether RAG context was used
+	KB        string `json:"kb"`        // Knowledge base name (empty if no RAG)
+	LatencyMs int64  `json:"latency_ms"` // Request latency in milliseconds
 }
 
 // Chat handles assistant chat requests
@@ -66,6 +76,9 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 	if req.KnowledgeBase == "" {
 		req.KnowledgeBase = req.Assistant
 	}
+
+	// Record start time for latency measurement
+	startTime := time.Now()
 
 	log.Printf("[AssistantsHandler] Chat request - Assistant: %s, KB: %s", req.Assistant, req.KnowledgeBase)
 
@@ -127,9 +140,10 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 	}
 
 	// Parse JSON response from Python (stdout only)
-	var response ChatResponse
+	// First parse as map to handle flexible Python response
+	var rawResponse map[string]interface{}
 	stdoutBytes := stdout.Bytes()
-	if err := json.Unmarshal(stdoutBytes, &response); err != nil {
+	if err := json.Unmarshal(stdoutBytes, &rawResponse); err != nil {
 		log.Printf("[AssistantsHandler] Error parsing Python response: %v", err)
 		previewLen := 500
 		if len(stdoutBytes) < previewLen {
@@ -144,7 +158,8 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 	}
 
 	// Check for error in metadata
-	if errorMsg, ok := response.Metadata["error"].(string); ok && errorMsg != "" {
+	rawMetadata, _ := rawResponse["metadata"].(map[string]interface{})
+	if errorMsg, ok := rawMetadata["error"].(string); ok && errorMsg != "" {
 		log.Printf("[AssistantsHandler] Assistant returned error: %s", errorMsg)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -153,6 +168,85 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 		return
 	}
 
+	// Extract and validate required fields
+	answer, _ := rawResponse["answer"].(string)
+	if answer == "" {
+		log.Printf("[AssistantsHandler] Assistant returned empty answer")
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Assistant returned empty answer",
+		})
+		return
+	}
+
+	assistant, _ := rawResponse["assistant"].(string)
+	if assistant == "" {
+		assistant = req.Assistant
+	}
+
+	// Ensure citations is always an array (never null)
+	var citations []string
+	if rawCitations, ok := rawResponse["citations"].([]interface{}); ok {
+		citations = make([]string, 0, len(rawCitations))
+		for _, cit := range rawCitations {
+			if str, ok := cit.(string); ok {
+				citations = append(citations, str)
+			}
+		}
+	}
+	if citations == nil {
+		citations = []string{}
+	}
+
+	// Calculate latency
+	latencyMs := time.Since(startTime).Milliseconds()
+
+	// Build normalized metadata
+	normalizedMetadata := ChatMetadata{
+		Model:     getStringFromMap(rawMetadata, "model", ""),
+		Provider:  getStringFromMap(rawMetadata, "provider", "ollama"),
+		RagUsed:   getBoolFromMap(rawMetadata, "rag_used", false),
+		KB:        req.KnowledgeBase,
+		LatencyMs: latencyMs,
+	}
+
+	// Build final response with locked contract
+	response := ChatResponse{
+		Assistant: assistant,
+		Answer:    answer,
+		Citations: citations,
+		Metadata:  normalizedMetadata,
+	}
+
+	// Log observability metrics
+	log.Printf("[AssistantsHandler] ✅ Assistant: %s, KB: %s, RAG: %v, Latency: %dms, Answer length: %d chars, Citations: %d",
+		response.Assistant,
+		normalizedMetadata.KB,
+		normalizedMetadata.RagUsed,
+		normalizedMetadata.LatencyMs,
+		len(response.Answer),
+		len(response.Citations),
+	)
+
 	// Return successful response
 	c.JSON(http.StatusOK, response)
+}
+
+// Helper functions for metadata extraction
+func getStringFromMap(m map[string]interface{}, key string, defaultValue string) string {
+	if val, ok := m[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return defaultValue
+}
+
+func getBoolFromMap(m map[string]interface{}, key string, defaultValue bool) bool {
+	if val, ok := m[key]; ok {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return defaultValue
 }

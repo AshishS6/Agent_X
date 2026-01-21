@@ -17,7 +17,10 @@ import {
     Database,
     Settings,
     ChevronRight,
-    X
+    X,
+    MessageSquare,
+    Code,
+    Sparkles
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -43,6 +46,14 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
             title: 'Overview',
             items: [
                 { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+            ]
+        },
+        {
+            title: 'Assistants',
+            items: [
+                { path: '/assistants/fintech', label: 'Fintech Assistant', icon: DollarSign },
+                { path: '/assistants/code', label: 'Code Assistant', icon: Code },
+                { path: '/assistants/general', label: 'General Assistant', icon: Sparkles },
             ]
         },
         {
