@@ -185,11 +185,24 @@ class KYCDecisionEngine:
             
             # Phase 4: Run entity matching
             self.audit_builder.add_timestamp("ENTITY_MATCH_START", "Starting legal entity matching")
-            entity_match = await self._match_legal_entity(
-                merchant_input,
-                scan_data,
-                scan_id
-            )
+            self.logger.info(f"[KYC][{scan_id}] Starting entity matching...")
+            try:
+                # Add timeout to prevent hanging
+                entity_match = await asyncio.wait_for(
+                    self._match_legal_entity(
+                        merchant_input,
+                        scan_data,
+                        scan_id
+                    ),
+                    timeout=30.0  # 30 second timeout
+                )
+                self.logger.info(f"[KYC][{scan_id}] Entity matching completed")
+            except asyncio.TimeoutError:
+                self.logger.warning(f"[KYC][{scan_id}] Entity matching timed out after 30s, continuing...")
+                entity_match = None
+            except Exception as e:
+                self.logger.error(f"[KYC][{scan_id}] Entity matching error: {e}", exc_info=True)
+                entity_match = None
             self.audit_builder.add_timestamp("ENTITY_MATCH_COMPLETE", "Entity matching completed")
             
             if entity_match:
@@ -470,6 +483,8 @@ class KYCDecisionEngine:
                     has_cta=result.has_cta,
                     cta_clickable=result.cta_clickable,
                     checkout_reachable=result.checkout_reachable,
+                    checkout_url=result.checkout_url,
+                    checkout_confidence=result.checkout_confidence,
                     pricing_visible=True,  # Pricing page found
                     form_fields_present=result.form_fields_present,
                     dead_ctas=result.dead_ctas,
@@ -491,6 +506,8 @@ class KYCDecisionEngine:
                 has_cta=product_details.get('has_cart', False),
                 cta_clickable=False,  # Unknown
                 checkout_reachable=False,  # Unknown
+                checkout_url=None,
+                checkout_confidence=0.0,
                 pricing_visible=product_details.get('has_pricing', False) or policy_details.get('pricing', {}).get('found', False),
                 form_fields_present=False,  # Unknown
             )

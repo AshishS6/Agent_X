@@ -176,9 +176,16 @@ class CheckoutFlowResult(BaseModel):
     has_cta: bool = Field(default=False, description="Whether CTAs were found")
     cta_clickable: bool = Field(default=False, description="Whether CTAs are clickable")
     checkout_reachable: bool = Field(default=False, description="Whether checkout page is reachable")
+    checkout_url: Optional[str] = Field(default=None, description="URL of the checkout/cart page reached")
     pricing_visible: bool = Field(default=False, description="Whether pricing is visible")
     form_fields_present: bool = Field(default=False, description="Whether form fields exist")
     dead_ctas: List[str] = Field(default_factory=list, description="List of dead CTAs found")
+    checkout_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score for checkout page detection (0.0-1.0)"
+    )
     evidence: Optional[Dict[str, Any]] = Field(default=None)
 
 

@@ -372,6 +372,8 @@ class TestDecisionRules:
             has_cta=True,
             cta_clickable=True,
             checkout_reachable=True,
+            checkout_url="https://example.com/checkout",
+            checkout_confidence=0.85,
             pricing_visible=True,
             form_fields_present=True,
         )

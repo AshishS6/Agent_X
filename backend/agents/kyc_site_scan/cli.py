@@ -100,6 +100,30 @@ async def run_scan(
         print(f"  Best Match: {result.entity_match.best_match or 'None'}")
         print(f"  Score: {result.entity_match.match_score:.1f}%")
         print(f"  Status: {result.entity_match.match_status}")
+        
+        # Display address match if available
+        if result.entity_match.address_match:
+            addr_match = result.entity_match.address_match
+            print(f"\n  Address Match:")
+            declared_addr = addr_match.get('declared', 'N/A')
+            # Show full address or truncate if too long
+            if len(declared_addr) > 120:
+                print(f"    Declared Address: {declared_addr[:120]}...")
+            else:
+                print(f"    Declared Address: {declared_addr}")
+            
+            website_addr = addr_match.get('best_match')
+            if website_addr:
+                # Show full address or truncate if too long
+                if len(website_addr) > 120:
+                    print(f"    Website Address: {website_addr[:120]}...")
+                else:
+                    print(f"    Website Address: {website_addr}")
+            else:
+                print(f"    Website Address: Not found on website")
+            
+            print(f"    Match Score: {addr_match.get('score', 0.0):.1f}%")
+            print(f"    Status: {addr_match.get('status', 'N/A')}")
     
     print(f"\nAudit Trail:")
     print(f"  Scan ID: {result.audit_trail.scan_id}")
