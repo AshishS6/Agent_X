@@ -22,7 +22,7 @@ var Registry = map[string]ToolConfig{}
 
 // InitRegistry initializes the tool registry with configurable timeouts
 // This should be called from main.go after loading configuration
-func InitRegistry(marketResearchTimeout, salesAgentTimeout time.Duration) {
+func InitRegistry(marketResearchTimeout, salesAgentTimeout, blogAgentTimeout time.Duration) {
 	Registry = map[string]ToolConfig{
 		"market_research": {
 			Name:             "Market Research Agent",
@@ -43,6 +43,16 @@ func InitRegistry(marketResearchTimeout, salesAgentTimeout time.Duration) {
 			WorkingDir:       ".",
 			ConcurrencyLimit: 5,
 			AgentType:        "sales",
+		},
+		"blog": {
+			Name:             "Blog Agent",
+			Description:      "Generates structured blog outlines and drafts for marketing teams",
+			Command:          "python3",
+			Args:             []string{"backend/agents/blog_agent/cli.py"},
+			Timeout:          blogAgentTimeout,
+			WorkingDir:       ".",
+			ConcurrencyLimit: 5,
+			AgentType:        "blog",
 		},
 		// Add more tools here as needed...
 		// Example:

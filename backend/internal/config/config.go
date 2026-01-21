@@ -21,6 +21,7 @@ type Config struct {
 	OpenAIAPIKey                string
 	MarketResearchTimeout       time.Duration
 	SalesAgentTimeout           time.Duration
+	BlogAgentTimeout            time.Duration
 }
 
 var AppConfig *Config
@@ -41,6 +42,7 @@ func Load() *Config {
 		OpenAIAPIKey:                getEnv("OPENAI_API_KEY", ""),
 		MarketResearchTimeout:       getEnvDuration("MARKET_RESEARCH_TIMEOUT", 10*time.Minute),
 		SalesAgentTimeout:           getEnvDuration("SALES_AGENT_TIMEOUT", 3*time.Minute),
+		BlogAgentTimeout:            getEnvDuration("BLOG_AGENT_TIMEOUT", 5*time.Minute),
 	}
 
 	AppConfig = config

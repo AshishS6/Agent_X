@@ -94,6 +94,7 @@ INSERT INTO agents (type, name, description, status, config) VALUES
   ('hr', 'HR Agent', 'Screens candidates, answers employee questions, and manages HR workflows.', 'active', '{}'),
   ('market_research', 'Market Research Agent', 'Analyzes market trends, competitor data, and industry reports.', 'active', '{}'),
   ('marketing', 'Marketing Agent', 'Creates content, manages campaigns, and optimizes marketing strategies.', 'active', '{}'),
+  ('blog', 'Blog Agent', 'Generates structured blog outlines and drafts for marketing teams.', 'active', '{}'),
   ('leads', 'Lead Sourcing Agent', 'Identifies and qualifies potential leads from various sources.', 'active', '{}'),
   ('intelligence', 'Intelligence Agent', 'Gathers and analyzes business intelligence data.', 'active', '{}'),
   ('legal', 'Legal Agent', 'Reviews contracts, conducts due diligence, and analyzes legal documents.', 'active', '{}'),

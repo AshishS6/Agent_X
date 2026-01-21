@@ -6,6 +6,7 @@ import SupportAgent from './pages/SupportAgent';
 import HRAgent from './pages/HRAgent';
 import MarketResearchAgent from './pages/MarketResearchAgent';
 import MarketingAgent from './pages/MarketingAgent';
+import BlogAgent from './pages/BlogAgent';
 import LeadSourcingAgent from './pages/LeadSourcingAgent';
 import IntelligenceAgent from './pages/IntelligenceAgent';
 import LegalAgent from './pages/LegalAgent';
@@ -25,6 +26,7 @@ function App() {
         <Route path="hr" element={<HRAgent />} />
         <Route path="market-research" element={<MarketResearchAgent />} />
         <Route path="marketing" element={<MarketingAgent />} />
+        <Route path="blog" element={<BlogAgent />} />
         <Route path="leads" element={<LeadSourcingAgent />} />
         <Route path="intelligence" element={<IntelligenceAgent />} />
         <Route path="legal" element={<LegalAgent />} />

@@ -1,0 +1,11 @@
+# Blog Agent Requirements
+# Core dependencies are inherited from parent requirements.txt
+# Add agent-specific dependencies here if needed
+
+# Standard dependencies (inherited from backend/agents/requirements.txt):
+# - langchain
+# - langchain-openai
+# - langchain-anthropic
+# - langchain-community
+# - python-dotenv
+# - pydantic

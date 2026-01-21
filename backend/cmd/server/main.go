@@ -42,10 +42,11 @@ func main() {
 	log.Printf("📁 Project root: %s", projectRoot)
 
 	// Initialize tool registry with configurable timeouts
-	tools.InitRegistry(cfg.MarketResearchTimeout, cfg.SalesAgentTimeout)
-	log.Printf("🔧 Tool timeouts configured - Market Research: %v, Sales: %v",
+	tools.InitRegistry(cfg.MarketResearchTimeout, cfg.SalesAgentTimeout, cfg.BlogAgentTimeout)
+	log.Printf("🔧 Tool timeouts configured - Market Research: %v, Sales: %v, Blog: %v",
 		cfg.MarketResearchTimeout,
 		cfg.SalesAgentTimeout,
+		cfg.BlogAgentTimeout,
 	)
 
 	// Create executor with hybrid concurrency control
