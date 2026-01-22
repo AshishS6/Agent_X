@@ -1,6 +1,9 @@
 """
 Base Agent Framework for Agent_X
 Provides core functionality for all AI agents
+
+This module uses the LLM Router for all LLM calls.
+All LLM provider selection and usage tracking is handled centrally.
 """
 
 import os
@@ -16,6 +19,9 @@ from langchain.tools import BaseTool
 from langchain.prompts import PromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
+
+# Import LLM Router
+from llm.router import LLMRouter, Intent, get_router
 
 # Configure logging
 logging.basicConfig(
@@ -60,11 +66,16 @@ class BaseAgent(ABC):
     Base class for all AI agents
     
     Provides:
-    - LLM integration (OpenAI, Anthropic, Ollama)
+    - LLM integration via LLM Router (local-first with cloud fallback)
     - Tool registration and execution
     - Memory management
     - Logging and error handling
     - Conversation tracking
+    
+    All LLM calls go through the centralized LLM Router which handles:
+    - Provider selection (local-first)
+    - Automatic fallback
+    - Usage tracking (tokens, costs, latency)
     """
     
     def __init__(self, config: AgentConfig):
@@ -73,7 +84,10 @@ class BaseAgent(ABC):
         self.tools: List[BaseTool] = []
         self.conversation_history: List[Dict[str, Any]] = []
         
-        # Initialize LLM
+        # Initialize LLM Router
+        self.router = get_router()
+        
+        # Initialize LLM through router
         self.llm = self._create_llm()
         
         # Register agent-specific tools
@@ -82,34 +96,62 @@ class BaseAgent(ABC):
         self.logger.info(f"Initialized {config.name} with {len(self.tools)} tools")
     
     def _create_llm(self):
-        """Create LLM based on provider"""
-        provider = self.config.llm_provider.lower()
+        """
+        Create LLM through centralized router
         
-        if provider == "openai":
-            from langchain_openai import ChatOpenAI
-            return ChatOpenAI(
-                model=self.config.model,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                api_key=os.getenv("OPENAI_API_KEY")
-            )
-        elif provider == "anthropic":
-            from langchain_anthropic import ChatAnthropic
-            return ChatAnthropic(
-                model=self.config.model,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                api_key=os.getenv("ANTHROPIC_API_KEY")
-            )
-        elif provider == "ollama":
-            from langchain_community.chat_models import ChatOllama
-            return ChatOllama(
-                model=self.config.model,
-                temperature=self.config.temperature,
-                base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-            )
+        The router handles:
+        - Local-first provider selection
+        - Automatic fallback if local unavailable
+        - Usage tracking
+        - Health checks
+        """
+        # Determine intent based on agent type
+        intent = self._get_intent_for_agent()
+        
+        # Get model preference (if specified in config)
+        model_preference = None
+        if self.config.model:
+            # If model is specified, try to use it
+            # Format: "provider:model" or just "model"
+            model_preference = self.config.model
+        
+        # Get LLM client from router
+        # Router will select best provider based on:
+        # - LLM_MODE (local_first, cloud_only, local_only)
+        # - Provider health
+        # - Priority order
+        llm = self.router.get_chat_client(
+            caller=self.config.agent_type,
+            intent=intent,
+            model_preference=model_preference,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens
+        )
+        
+        self.logger.info(
+            f"LLM client created via router - Agent: {self.config.agent_type}, "
+            f"Intent: {intent.value if intent else 'chat'}, "
+            f"Model preference: {model_preference or 'auto'}"
+        )
+        
+        return llm
+    
+    def _get_intent_for_agent(self) -> Optional[Intent]:
+        """
+        Determine LLM intent based on agent type
+        
+        This helps the router select the best model for the task.
+        """
+        agent_type = self.config.agent_type.lower()
+        
+        if "blog" in agent_type:
+            return Intent.LONG_FORM
+        elif "research" in agent_type or "analysis" in agent_type:
+            return Intent.ANALYSIS
+        elif "code" in agent_type:
+            return Intent.CODE
         else:
-            raise ValueError(f"Unknown LLM provider: {provider}")
+            return Intent.CHAT
     
     @abstractmethod
     def _register_tools(self):

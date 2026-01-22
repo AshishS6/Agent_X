@@ -6,11 +6,16 @@ This is a minimal CLI tool that:
 1. Loads assistant config
 2. Calls KnowledgePipeline for RAG
 3. Builds prompt using prompt_builder
-4. Calls OllamaClient for LLM response
+4. Calls LLM Router for LLM response (local-first with cloud fallback)
 5. Returns structured JSON
 
 Usage:
     python runner.py --input '{"message": "...", "assistant": "fintech", "knowledge_base": "fintech"}'
+
+All LLM calls go through the centralized LLM Router which handles:
+- Local-first provider selection
+- Automatic fallback to cloud if local unavailable
+- Usage tracking (tokens, costs, latency)
 """
 
 import sys
@@ -37,7 +42,7 @@ from assistants.prompt_builder import build_fintech_prompt, build_generic_prompt
 # Import knowledge and LLM modules
 from knowledge.vector_store import ChromaDBStore, OllamaEmbeddingClient
 from knowledge.retrieval import KnowledgePipeline
-from llm.providers import OllamaClient
+from llm.router import LLMRouter, Intent, get_router
 
 
 # Assistant registry
@@ -67,13 +72,15 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
     assistant_class = ASSISTANTS[assistant_name]
     config = assistant_class.get_config()
     
-    logger.info(f"Running assistant: {assistant_name} with model: {config.model}")
+    logger.info(f"Running assistant: {assistant_name} with model preference: {config.model}")
     
     # Initialize components
     embedding_client = OllamaEmbeddingClient()
     vector_store = ChromaDBStore()
     knowledge_pipeline = KnowledgePipeline(embedding_client, vector_store)
-    ollama_client = OllamaClient()
+    
+    # Initialize LLM Router (handles provider selection and fallback)
+    router = get_router()
     
     try:
         # Step 1: Get RAG context if enabled
@@ -111,10 +118,22 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
             # No RAG - use direct prompt
             prompt = f"{config.system_prompt}\n\nQuestion: {message}\n\nAnswer:"
         
-        # Step 3: Call Ollama using /api/generate (works with all models)
-        logger.info(f"Calling Ollama with model: {config.model}")
+        # Step 3: Call LLM Router (local-first with cloud fallback)
+        # Router will:
+        # 1. Try Ollama first (local)
+        # 2. Fallback to OpenAI/Anthropic if Ollama unavailable
+        # 3. Track usage (tokens, costs, latency)
         
-        # Build full prompt for /api/generate endpoint
+        # Determine intent based on assistant type
+        intent = Intent.CHAT
+        if assistant_name == "code":
+            intent = Intent.CODE
+        elif assistant_name == "fintech":
+            intent = Intent.ANALYSIS
+        
+        logger.info(f"Calling LLM Router - Assistant: {assistant_name}, Intent: {intent.value}, Model preference: {config.model}")
+        
+        # Build full prompt
         if config.use_rag and context_text:
             # RAG prompt already includes system instructions
             full_prompt = prompt
@@ -122,17 +141,30 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
             # No RAG - combine system prompt and user message
             full_prompt = f"{config.system_prompt}\n\nQuestion: {message}\n\nAnswer:"
         
-        # Use /api/generate instead of /api/chat (works with all models)
+        # Generate completion through router
         try:
-            response_text = await ollama_client.generate(
-                model=config.model,
+            result = await router.generate_completion(
+                caller=assistant_name,
                 prompt=full_prompt,
-                stream=False
+                model_preference=config.model,  # Router will try to use this model
+                intent=intent
             )
             
-            logger.info(f"Received response length: {len(response_text)} chars")
+            response_text = result["text"]
+            usage = result["usage"]
+            provider = result["provider"]
+            model_id = result["model_id"]
+            
+            logger.info(
+                f"✅ LLM Response - Provider: {provider}, Model: {model_id}, "
+                f"Response length: {len(response_text)} chars, "
+                f"Tokens: {usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)}, "
+                f"Cost: ${usage.get('estimated_cost_usd', 0):.6f}, "
+                f"Latency: {usage.get('latency_ms', 0):.0f}ms"
+            )
+            
         except Exception as e:
-            logger.error(f"Ollama generate failed: {e}", exc_info=True)
+            logger.error(f"LLM Router generate failed: {e}", exc_info=True)
             raise
         
         # Step 4: Return structured response (LOCKED CONTRACT)
@@ -142,17 +174,17 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
             "answer": response_text,  # Required: markdown-formatted answer
             "citations": sorted(public_urls) if public_urls else [],  # Required: array (never null)
             "metadata": {
-                "model": config.model,
-                "provider": "ollama",
+                "model": model_id.split(":", 1)[1] if ":" in model_id else model_id,  # Just model name for compatibility
+                "provider": provider,
                 "rag_used": config.use_rag and bool(context_text),
-                "kb": config.knowledge_base if (config.use_rag and bool(context_text)) else ""
+                "kb": config.knowledge_base if (config.use_rag and bool(context_text)) else "",
+                "usage": usage  # Include usage metadata
             }
         }
     
     finally:
         # Cleanup
         await embedding_client.close()
-        await ollama_client.close()
 
 
 def main():

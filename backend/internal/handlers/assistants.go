@@ -110,9 +110,22 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 	// Set working directory
 	cmd.Dir = filepath.Join(h.projectRoot, "backend")
 
-	// Set environment variables
+	// Set environment variables for LLM Router
+	// All LLM calls go through the centralized router
 	cmd.Env = append(os.Environ(),
+		// LLM Router Configuration (AUTHORITATIVE)
+		"LLM_MODE="+os.Getenv("LLM_MODE"),
+		"LLM_PRIORITY="+os.Getenv("LLM_PRIORITY"),
+		"LLM_FALLBACK_ENABLED="+os.Getenv("LLM_FALLBACK_ENABLED"),
+		"LLM_LOCAL_MODEL="+os.Getenv("LLM_LOCAL_MODEL"),
+		"LLM_CLOUD_MODEL="+os.Getenv("LLM_CLOUD_MODEL"),
+		
+		// Provider Configuration
 		"OLLAMA_BASE_URL="+os.Getenv("OLLAMA_BASE_URL"),
+		"OPENAI_API_KEY="+os.Getenv("OPENAI_API_KEY"),
+		"ANTHROPIC_API_KEY="+os.Getenv("ANTHROPIC_API_KEY"),
+		
+		// Python Path
 		"PYTHONPATH="+filepath.Join(h.projectRoot, "backend"),
 	)
 
