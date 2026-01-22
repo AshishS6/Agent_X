@@ -117,6 +117,40 @@ usage = result["usage"]  # Contains tokens, cost, latency
 - ✅ No hardcoded models
 - ✅ Extensive logging
 
+## 🧪 Testing
+
+### Smoke test (recommended)
+
+A dedicated script verifies router init, health checks, optional completion, and usage tracking:
+
+```bash
+cd backend
+PYTHONPATH=. python3 scripts/test_llm_router.py
+```
+
+- **With completion** (default): Requires Ollama running **or** `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. Runs a minimal `generate_completion` and prints provider, response, and usage.
+- **Without completion**: Use `--skip-completion` to only run init, health, and tracker. Useful when no LLM is available.
+
+```bash
+PYTHONPATH=. python3 scripts/test_llm_router.py --skip-completion
+```
+
+Dependencies: same as agents (`backend/agents/requirements.txt`). Ensure `backend/.env` (or `LLM_*` / provider env vars) is set.
+
+### End-to-end: Assistant API
+
+1. Start backend: `cd backend && make dev`
+2. Start Ollama (or configure cloud keys): `ollama serve` and `ollama pull qwen2.5:7b`
+3. Call the fintech assistant:
+
+```bash
+curl -X POST http://localhost:3001/api/assistants/fintech/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "How do I integrate Zwitch?", "knowledge_base": "fintech", "assistant": "fintech"}'
+```
+
+All LLM calls go through the router (local-first → cloud fallback). Check backend logs for provider selection and usage.
+
 ## 🚀 Migration Notes
 
 ### Backward Compatibility
@@ -175,6 +209,9 @@ LLM_FALLBACK_ENABLED=false
 1. `LLM_FALLBACK_ENABLED=true`
 2. Multiple providers in `LLM_PRIORITY`
 3. Check health status in logs
+
+### Issue: `"ChatOllama" object has no field "invoke"` (fixed)
+The router previously monkey-patched `client.invoke` on LangChain clients. Those are Pydantic models and reject arbitrary attribute assignment. **Fix**: The router now returns a `_TrackedLangChainClient` wrapper that implements `invoke` with tracking and delegates other attributes to the underlying client. No monkey-patching.
 
 ## 📈 Usage Statistics
 

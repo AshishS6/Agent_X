@@ -33,6 +33,81 @@ from ..providers.ollama_client import OllamaClient
 logger = logging.getLogger(__name__)
 
 
+class _TrackedLangChainClient:
+    """
+    Wrapper around a LangChain chat model that tracks usage on invoke().
+
+    LangChain clients (ChatOllama, ChatOpenAI, etc.) are Pydantic models and
+    reject arbitrary attribute assignment. We avoid monkey-patching by
+    wrapping the client and delegating invoke + __getattr__.
+    """
+
+    def __init__(
+        self,
+        client,
+        tracker,
+        caller: str,
+        provider: "Provider",
+        model_id: str,
+        intent: "Intent",
+        start_time: float,
+        fallback_used: bool,
+        fallback_reason: Optional[str],
+        estimate_tokens_fn,
+    ):
+        self._client = client
+        self._tracker = tracker
+        self._caller = caller
+        self._provider = provider
+        self._model_id = model_id
+        self._intent = intent
+        self._start_time = start_time
+        self._fallback_used = fallback_used
+        self._fallback_reason = fallback_reason
+        self._estimate_tokens = estimate_tokens_fn
+
+    def invoke(self, messages: List[BaseMessage], **kwargs):
+        invoke_start = time.time()
+        try:
+            response = self._client.invoke(messages, **kwargs)
+            latency_ms = (time.time() - invoke_start) * 1000
+            input_text = "\n".join([getattr(m, "content", str(m)) for m in messages])
+            input_tokens = self._estimate_tokens(input_text)
+            output_tokens = self._estimate_tokens(getattr(response, "content", str(response)))
+            self._tracker.record_usage(
+                caller=self._caller,
+                provider=self._provider.value,
+                model_id=self._model_id,
+                intent=self._intent.value,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                success=True,
+                fallback_used=self._fallback_used,
+                fallback_reason=self._fallback_reason,
+            )
+            return response
+        except Exception as e:
+            latency_ms = (time.time() - invoke_start) * 1000
+            self._tracker.record_usage(
+                caller=self._caller,
+                provider=self._provider.value,
+                model_id=self._model_id,
+                intent=self._intent.value,
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=latency_ms,
+                success=False,
+                error=str(e),
+                fallback_used=self._fallback_used,
+                fallback_reason=self._fallback_reason,
+            )
+            raise
+
+    def __getattr__(self, name: str):
+        return getattr(self._client, name)
+
+
 class LLMMode(str, Enum):
     """LLM routing mode"""
     LOCAL_FIRST = "local_first"  # Try local, fallback to cloud
@@ -521,56 +596,23 @@ class LLMRouter:
         fallback_used: bool,
         fallback_reason: Optional[str]
     ):
-        """Wrap LangChain client to track usage"""
-        original_invoke = client.invoke
-        
-        def tracked_invoke(messages: List[BaseMessage], **kwargs):
-            invoke_start = time.time()
-            try:
-                response = original_invoke(messages, **kwargs)
-                
-                # Calculate latency
-                latency_ms = (time.time() - invoke_start) * 1000
-                
-                # Estimate tokens
-                input_text = "\n".join([msg.content for msg in messages])
-                input_tokens = self._estimate_tokens(input_text)
-                output_tokens = self._estimate_tokens(response.content)
-                
-                # Track usage
-                self.tracker.record_usage(
-                    caller=caller,
-                    provider=provider.value,
-                    model_id=model_id,
-                    intent=intent.value,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    latency_ms=latency_ms,
-                    success=True,
-                    fallback_used=fallback_used,
-                    fallback_reason=fallback_reason
-                )
-                
-                return response
-            except Exception as e:
-                latency_ms = (time.time() - invoke_start) * 1000
-                self.tracker.record_usage(
-                    caller=caller,
-                    provider=provider.value,
-                    model_id=model_id,
-                    intent=intent.value,
-                    input_tokens=0,
-                    output_tokens=0,
-                    latency_ms=latency_ms,
-                    success=False,
-                    error=str(e),
-                    fallback_used=fallback_used,
-                    fallback_reason=fallback_reason
-                )
-                raise
-        
-        client.invoke = tracked_invoke
-        return client
+        """Wrap LangChain client to track usage via a wrapper (no monkey-patching).
+
+        LangChain chat models are Pydantic-based and reject attribute assignment.
+        We return a _TrackedLangChainClient that delegates invoke + other attrs.
+        """
+        return _TrackedLangChainClient(
+            client=client,
+            tracker=self.tracker,
+            caller=caller,
+            provider=provider,
+            model_id=model_id,
+            intent=intent,
+            start_time=start_time,
+            fallback_used=fallback_used,
+            fallback_reason=fallback_reason,
+            estimate_tokens_fn=self._estimate_tokens,
+        )
     
     async def _generate_ollama(self, model_id: str, prompt: str, **kwargs) -> str:
         """Generate using Ollama"""

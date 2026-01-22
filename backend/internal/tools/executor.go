@@ -125,7 +125,10 @@ func (e *Executor) Execute(ctx context.Context, tool ToolConfig, input map[strin
 
 	// Set environment variables for LLM Router
 	// All LLM calls go through the centralized router
+	backendPath := filepath.Join(e.projectRoot, "backend")
 	cmd.Env = append(os.Environ(),
+		// Python path so agents can import llm, agents.shared, etc.
+		"PYTHONPATH="+backendPath,
 		// LLM Router Configuration (AUTHORITATIVE)
 		"LLM_MODE="+os.Getenv("LLM_MODE"),
 		"LLM_PRIORITY="+os.Getenv("LLM_PRIORITY"),
