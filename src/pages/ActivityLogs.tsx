@@ -13,10 +13,12 @@ import {
     Database,
     Info,
     Loader2,
-    Clock
+    Clock,
+    Activity
 } from 'lucide-react';
 import clsx from 'clsx';
 import { MonitoringService, Task } from '../services/api';
+import { EmptyState } from '../components/EmptyState';
 
 // Helper to map agent type to icon
 const getAgentIcon = (type: string) => {
@@ -198,9 +200,17 @@ const ActivityLogs = () => {
                             </div>
                         ))}
                         {filteredLogs.length === 0 && (
-                            <div className="text-center py-8 text-gray-500 text-sm">
-                                No activity logs found.
-                            </div>
+                            <EmptyState
+                                icon={Activity}
+                                title="No activity logs found"
+                                description={
+                                    filterType === 'All'
+                                        ? "Activity logs will appear here as agents process tasks and workflows execute."
+                                        : `No ${filterType.toLowerCase()} logs found. Try adjusting your filters or time range.`
+                                }
+                                hint="Activity includes task executions, workflow runs, and system events."
+                                variant="minimal"
+                            />
                         )}
                     </div>
                 </div>

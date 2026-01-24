@@ -11,10 +11,13 @@ import {
     Layout,
     LifeBuoy,
     Clock,
-    Loader2
+    Loader2,
+    ExternalLink
 } from 'lucide-react';
 import clsx from 'clsx';
 import { IntegrationService, Integration } from '../services/api';
+import { ErrorState } from '../components/ErrorState';
+import { EmptyState } from '../components/EmptyState';
 
 const iconMap: Record<string, any> = {
     salesforce: Briefcase,
@@ -208,8 +211,21 @@ const Integrations = () => {
             <div className="flex-1 flex gap-6 min-h-0">
                 {/* Integrations Grid (Left 2/3) */}
                 <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {integrations.map((integration) => {
+                    {integrations.length === 0 ? (
+                        <EmptyState
+                            icon={Database}
+                            title="No integrations connected"
+                            description="Connect external tools and services to enable automation and data synchronization."
+                            primaryAction={{
+                                label: 'Add Integration',
+                                onClick: () => setShowAddModal(true),
+                                icon: Plus,
+                            }}
+                            hint="Popular integrations include Salesforce, Slack, Gmail, HubSpot, Zendesk, and Notion."
+                        />
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {integrations.map((integration) => {
                             const Icon = iconMap[integration.type] || Database;
                             return (
                                 <div
@@ -253,7 +269,8 @@ const Integrations = () => {
                                 </div>
                             );
                         })}
-                    </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Integration Detail (Right 1/3) */}
@@ -302,11 +319,61 @@ const Integrations = () => {
                             </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
-                            <div className="text-center py-8 text-gray-500">
-                                <Settings size={48} className="mx-auto mb-4 opacity-20" />
-                                <p>Configuration options available when connected.</p>
-                            </div>
+                        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+                            {selectedIntegration.status === 'error' && (
+                                <ErrorState
+                                    title="Integration Failed"
+                                    message={`${selectedIntegration.name} is not connected and may be experiencing issues.`}
+                                    failureReason={
+                                        selectedIntegration.config?.error || 
+                                        (selectedIntegration.lastSync 
+                                            ? `Last sync failed at ${new Date(selectedIntegration.lastSync || '').toLocaleString()}`
+                                            : 'Connection failed. Check your credentials and network connection.')
+                                    }
+                                    impact={
+                                        selectedIntegration.type === 'notion' 
+                                            ? 'Blog content cannot be synced to Notion. New blog posts will not appear in your workspace.'
+                                            : selectedIntegration.type === 'salesforce' || selectedIntegration.type === 'hubspot'
+                                            ? 'CRM data synchronization is paused. Lead and contact updates may be delayed.'
+                                            : selectedIntegration.type === 'slack'
+                                            ? 'Notifications and alerts will not be sent to Slack channels.'
+                                            : selectedIntegration.type === 'gmail'
+                                            ? 'Email automation features are unavailable. Outbound emails will not be sent.'
+                                            : 'This integration is not functioning. Some features may be limited.'
+                                    }
+                                    primaryAction={{
+                                        label: 'Reconnect',
+                                        onClick: () => handleToggleConnection(selectedIntegration),
+                                        icon: RefreshCw,
+                                    }}
+                                    secondaryAction={{
+                                        label: 'View Logs',
+                                        onClick: () => {
+                                            // TODO: Navigate to logs or open logs modal
+                                            console.log('View logs for', selectedIntegration.id);
+                                        },
+                                        icon: ExternalLink,
+                                    }}
+                                    variant="error"
+                                />
+                            )}
+                            
+                            {selectedIntegration.status === 'disconnected' && (
+                                <div className="text-center py-8 text-gray-500">
+                                    <Settings size={48} className="mx-auto mb-4 opacity-20" />
+                                    <p className="mb-2">Integration is disconnected</p>
+                                    <p className="text-sm text-gray-600">
+                                        Connect this integration to enable synchronization and automation features.
+                                    </p>
+                                </div>
+                            )}
+
+                            {selectedIntegration.status === 'connected' && (
+                                <div className="text-center py-8 text-gray-500">
+                                    <Settings size={48} className="mx-auto mb-4 opacity-20" />
+                                    <p>Configuration options available when connected.</p>
+                                </div>
+                            )}
                         </div>
                     </div>
                 ) : (

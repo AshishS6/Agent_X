@@ -10,9 +10,12 @@ import {
     Zap,
     Briefcase,
     LifeBuoy,
-    Megaphone
+    Megaphone,
+    GitBranch
 } from 'lucide-react';
 import clsx from 'clsx';
+import { formatNumber, formatPercentage } from '../utils/formatting';
+import { EmptyState } from '../components/EmptyState';
 
 // Mock Data
 const workflows = [
@@ -118,7 +121,23 @@ const Workflows = () => {
 
                     {/* List */}
                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                        {workflows.map((workflow) => (
+                        {workflows.length === 0 ? (
+                            <EmptyState
+                                icon={GitBranch}
+                                title="No workflows yet"
+                                description="Create your first workflow to automate multi-agent tasks and processes."
+                                primaryAction={{
+                                    label: 'Create Workflow',
+                                    onClick: () => {
+                                        // TODO: Open workflow creation modal
+                                        console.log('Create workflow');
+                                    },
+                                    icon: Plus,
+                                }}
+                                hint="Workflows allow you to chain multiple agents together for complex automation."
+                            />
+                        ) : (
+                            workflows.map((workflow) => (
                             <div
                                 key={workflow.id}
                                 onClick={() => setSelectedWorkflow(workflow)}
@@ -174,15 +193,16 @@ const Workflows = () => {
                                         </div>
                                         <div className="flex items-center gap-1">
                                             <CheckCircle2 size={12} className="text-green-500" />
-                                            <span className="text-gray-300">{workflow.metrics.successRate}%</span>
+                                            <span className="text-gray-300">{formatPercentage(workflow.metrics.successRate, 1)}</span>
                                         </div>
                                         <div>
-                                            <span className="text-gray-300">{workflow.metrics.runs}</span> runs
+                                            <span className="text-gray-300">{formatNumber(workflow.metrics.runs)}</span> runs
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                        ))
+                        )}
                     </div>
                 </div>
 

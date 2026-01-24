@@ -1,32 +1,47 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { DollarSign, Users, Filter, Search, Play, Loader2 } from 'lucide-react';
+import { DollarSign, Users, Filter, Search, Play, Loader2, FileText } from 'lucide-react';
 import AgentLayout from '../components/Layout/AgentLayout';
 import { AgentService, TaskService, Task, AgentMetrics } from '../services/api';
+import { formatNumber, formatPercentage } from '../utils/formatting';
+import { EmptyState } from '../components/EmptyState';
+import { ConversationCard } from '../components/ConversationCard';
+import clsx from 'clsx';
+
+const TASKS_PAGE_SIZE = 10;
 
 const SalesAgent = () => {
     const [agentId, setAgentId] = useState<string | null>(null);
     const [metrics, setMetrics] = useState<AgentMetrics | null>(null);
     const [tasks, setTasks] = useState<Task[]>([]);
+    const [tasksTotal, setTasksTotal] = useState(0);
+    const [tasksPage, setTasksPage] = useState(1);
     const [loading, setLoading] = useState(true);
 
-
+    const fetchTasks = useCallback(async (id: string, page: number = 1) => {
+        const { tasks: agentTasks, total } = await TaskService.getAll({
+            agentId: id,
+            limit: TASKS_PAGE_SIZE,
+            offset: (page - 1) * TASKS_PAGE_SIZE,
+        });
+        setTasks(agentTasks);
+        setTasksTotal(total);
+        setTasksPage(page);
+    }, []);
 
     // Fetch agent data
     useEffect(() => {
         const fetchAgentData = async () => {
             try {
-                // Find sales agent ID
                 const agents = await AgentService.getAll();
                 const salesAgent = agents.find(a => a.type === 'sales');
 
                 if (salesAgent) {
                     setAgentId(salesAgent.id);
-                    const [agentMetrics, { tasks: agentTasks }] = await Promise.all([
+                    const [agentMetrics] = await Promise.all([
                         AgentService.getMetrics(salesAgent.id),
-                        TaskService.getAll({ agentId: salesAgent.id, limit: 10 })
+                        fetchTasks(salesAgent.id, tasksPage),
                     ]);
                     setMetrics(agentMetrics);
-                    setTasks(agentTasks);
                 }
             } catch (err) {
                 console.error('Failed to fetch agent data:', err);
@@ -38,9 +53,14 @@ const SalesAgent = () => {
         fetchAgentData();
         const interval = setInterval(fetchAgentData, 5000);
         return () => clearInterval(interval);
-    }, []);
+    }, [fetchTasks, tasksPage]);
 
     // --- Tab Content ---
+
+
+    const handleTaskCreated = useCallback(() => {
+        if (agentId) fetchTasks(agentId, 1);
+    }, [agentId, fetchTasks]);
 
     // Safe date formatter
     const formatDate = (dateString: string) => {
@@ -52,23 +72,26 @@ const SalesAgent = () => {
         }
     };
 
-    const handleTaskCreated = useCallback(() => {
-        if (agentId) {
-            TaskService.getAll({ agentId, limit: 10 }).then(({ tasks }) => setTasks(tasks));
-        }
-    }, [agentId]);
+    const tasksTotalPages = Math.max(1, Math.ceil(tasksTotal / TASKS_PAGE_SIZE));
 
-    // --- Tab Content ---
+    // Get last activity from most recent task
+    const lastActivity = useMemo(() => {
+        if (tasks.length === 0) return undefined;
+        const sortedTasks = [...tasks].sort((a, b) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        return sortedTasks[0]?.completedAt || sortedTasks[0]?.createdAt;
+    }, [tasks]);
 
     const overviewContent = useMemo(() => (
         <div className="space-y-6">
             {/* KPI Strip */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[
-                    { label: 'Total Tasks', value: metrics?.totalTasks || 0, trend: '+0%', color: 'text-blue-400', bg: 'bg-blue-400/10' },
-                    { label: 'Completed', value: metrics?.statusCounts?.completed || 0, trend: '+0%', color: 'text-green-400', bg: 'bg-green-400/10' },
-                    { label: 'Failed', value: metrics?.statusCounts?.failed || 0, trend: '0%', color: 'text-red-400', bg: 'bg-red-400/10' },
-                    { label: 'Success Rate', value: `${metrics?.totalTasks ? Math.round(((metrics.statusCounts?.completed || 0) / metrics.totalTasks) * 100) : 100}%`, trend: '+0%', color: 'text-orange-400', bg: 'bg-orange-400/10' },
+                    { label: 'Total Tasks', value: formatNumber(metrics?.totalTasks || 0, { showThousands: true }), trend: '+0%', color: 'text-blue-400', bg: 'bg-blue-400/10' },
+                    { label: 'Completed', value: formatNumber(metrics?.statusCounts?.completed || 0, { showThousands: true }), trend: '+0%', color: 'text-green-400', bg: 'bg-green-400/10' },
+                    { label: 'Failed', value: formatNumber(metrics?.statusCounts?.failed || 0, { showThousands: true }), trend: '0%', color: 'text-red-400', bg: 'bg-red-400/10' },
+                    { label: 'Success Rate', value: formatPercentage(metrics?.totalTasks ? ((metrics.statusCounts?.completed || 0) / metrics.totalTasks) * 100 : 100, 1, false), trend: '+0%', color: 'text-orange-400', bg: 'bg-orange-400/10' },
                 ].map((stat, i) => (
                     <div key={i} className="bg-gray-900 p-4 rounded-xl border border-gray-800">
                         <p className="text-sm text-gray-400">{stat.label}</p>
@@ -84,34 +107,75 @@ const SalesAgent = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Current Queue */}
-                <div className="lg:col-span-2 bg-gray-900 p-6 rounded-xl border border-gray-800">
+                <div className="lg:col-span-2 bg-gray-900 p-6 rounded-xl border border-gray-800 flex flex-col min-h-0">
                     <h3 className="text-lg font-bold text-white mb-4">Recent Tasks</h3>
-                    <div className="space-y-3">
-                        {tasks.length === 0 ? (
-                            <div className="text-center text-gray-500 py-8">No tasks found</div>
-                        ) : (
-                            tasks.map((task) => (
-                                <div key={task.id} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-800">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-2 h-2 rounded-full ${task.status === 'processing' ? 'bg-blue-500 animate-pulse' :
-                                            task.status === 'completed' ? 'bg-green-500' :
-                                                task.status === 'failed' ? 'bg-red-500' : 'bg-gray-500'
-                                            }`} />
-                                        <div>
-                                            <p className="text-sm font-medium text-white capitalize">{task.action.replace('_', ' ')}</p>
-                                            <p className="text-xs text-gray-500">{formatDate(task.createdAt)}</p>
+                    <div className="flex-1 min-h-0 flex flex-col">
+                        <div className="flex-1 min-h-[200px] max-h-[320px] overflow-y-auto space-y-3 pr-1">
+                            {tasks.length === 0 ? (
+                                <EmptyState
+                                    icon={DollarSign}
+                                    title="No tasks found"
+                                    description="You haven't created any tasks yet. Start by executing your first sales task."
+                                    primaryAction={{
+                                        label: 'Execute Task',
+                                        onClick: () => {
+                                            // Scroll to task form or focus it
+                                            document.querySelector('form')?.scrollIntoView({ behavior: 'smooth' });
+                                        },
+                                        icon: Play,
+                                    }}
+                                    hint="Tasks help automate lead qualification, email outreach, and meeting scheduling."
+                                    variant="minimal"
+                                />
+                            ) : (
+                                tasks.map((task) => (
+                                    <div key={task.id} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-800 shrink-0">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-2 h-2 rounded-full shrink-0 ${task.status === 'processing' ? 'bg-blue-500 animate-pulse' :
+                                                task.status === 'completed' ? 'bg-green-500' :
+                                                    task.status === 'failed' ? 'bg-red-500' : 'bg-gray-500'
+                                                }`} />
+                                            <div>
+                                                <p className="text-sm font-medium text-white capitalize">{task.action.replace('_', ' ')}</p>
+                                                <p className="text-xs text-gray-500">{formatDate(task.createdAt)}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3 shrink-0">
+                                            <span className={`text-xs px-2 py-1 rounded-full ${task.priority === 'high' ? 'bg-red-500/10 text-red-400' :
+                                                task.priority === 'medium' ? 'bg-yellow-500/10 text-yellow-400' :
+                                                    'bg-blue-500/10 text-blue-400'
+                                                }`}>
+                                                {task.priority}
+                                            </span>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className={`text-xs px-2 py-1 rounded-full ${task.priority === 'high' ? 'bg-red-500/10 text-red-400' :
-                                            task.priority === 'medium' ? 'bg-yellow-500/10 text-yellow-400' :
-                                                'bg-blue-500/10 text-blue-400'
-                                            }`}>
-                                            {task.priority}
-                                        </span>
-                                    </div>
+                                ))
+                            )}
+                        </div>
+                        {tasksTotal > TASKS_PAGE_SIZE && (
+                            <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-800">
+                                <p className="text-xs text-gray-500">
+                                    Showing {(tasksPage - 1) * TASKS_PAGE_SIZE + 1}–{Math.min(tasksPage * TASKS_PAGE_SIZE, tasksTotal)} of {tasksTotal}
+                                </p>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => agentId && fetchTasks(agentId, tasksPage - 1)}
+                                        disabled={tasksPage <= 1}
+                                        className="px-3 py-1.5 text-sm rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed border border-gray-700"
+                                    >
+                                        Previous
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => agentId && fetchTasks(agentId, tasksPage + 1)}
+                                        disabled={tasksPage >= tasksTotalPages}
+                                        className="px-3 py-1.5 text-sm rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed border border-gray-700"
+                                    >
+                                        Next
+                                    </button>
                                 </div>
-                            ))
+                            </div>
                         )}
                     </div>
                 </div>
@@ -126,46 +190,52 @@ const SalesAgent = () => {
                 </div>
             </div>
         </div>
-    ), [metrics, tasks, agentId, handleTaskCreated]);
+    ), [metrics, tasks, agentId, handleTaskCreated, fetchTasks, tasksPage, tasksTotal, tasksTotalPages]);
 
     const conversationsContent = useMemo(() => (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 flex flex-col h-[600px]">
+        <div className="w-full flex-1 min-h-0 flex flex-col bg-gray-900 rounded-xl border border-gray-800">
             {/* Toolbar */}
-            <div className="p-4 border-b border-gray-800 flex justify-between items-center">
-                <div className="relative">
+            <div className="p-4 border-b border-gray-800 flex justify-between items-center shrink-0">
+                <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
                     <input
                         type="text"
                         placeholder="Search conversations..."
-                        className="bg-gray-800 border border-gray-700 text-white text-sm rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-blue-500"
+                        className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:border-blue-500"
                     />
                 </div>
-                <button className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors">
+                <button className="flex items-center gap-2 text-gray-400 hover:text-white px-3 py-2 rounded-lg hover:bg-gray-800 transition-colors shrink-0">
                     <Filter size={16} />
                     <span className="text-sm">Filter</span>
                 </button>
             </div>
 
             {/* List */}
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4">
                 {tasks.filter(t => t.output).map((task) => (
-                    <div key={task.id} className="mb-4 p-4 border border-gray-800 rounded-lg hover:bg-gray-800/50 cursor-pointer transition-colors group">
-                        <div className="flex justify-between items-start mb-2">
-                            <div className="flex items-center gap-2">
-                                <span className="bg-blue-500/10 text-blue-400 text-xs font-medium px-2 py-1 rounded-full capitalize">{task.action.replace('_', ' ')}</span>
-                                <span className="text-gray-500 text-xs">ID: #{task.id.slice(0, 8)}</span>
-                            </div>
-                            <span className="text-gray-500 text-xs">{formatDate(task.createdAt)}</span>
-                        </div>
-                        <div className="text-gray-300 text-sm mt-2">
-                            <pre className="whitespace-pre-wrap font-sans text-gray-400">
-                                {JSON.stringify(task.output, null, 2)}
-                            </pre>
-                        </div>
-                    </div>
+                    <ConversationCard
+                        key={task.id}
+                        action={task.action}
+                        timestamp={task.createdAt}
+                        status={task.status}
+                        output={task.output}
+                        taskId={task.id}
+                    />
                 ))}
                 {tasks.filter(t => t.output).length === 0 && (
-                    <div className="text-center text-gray-500 mt-10">No conversation history yet</div>
+                    <EmptyState
+                        icon={Search}
+                        title="No conversation history yet"
+                        description="Completed tasks will appear here. Start by executing a task to see conversation results."
+                        primaryAction={{
+                            label: 'Execute Task',
+                            onClick: () => {
+                                // Navigate to overview tab or scroll to form
+                                window.location.hash = '';
+                            },
+                        }}
+                        hint="Conversations show the output and results from completed agent tasks."
+                    />
                 )}
             </div>
         </div>
@@ -198,6 +268,56 @@ const SalesAgent = () => {
             ))}
         </div>
     ), []);
+
+    const logsContent = useMemo(() => (
+        <div className="space-y-4">
+            <div className="bg-gray-900 p-6 rounded-xl border border-gray-800">
+                <h3 className="text-lg font-bold text-white mb-4">Activity Logs</h3>
+                <div className="space-y-3">
+                    {tasks.length === 0 ? (
+                        <EmptyState
+                            icon={FileText}
+                            title="No logs available"
+                            description="Task execution logs will appear here once tasks are processed."
+                            hint="Logs show detailed execution information for debugging and monitoring."
+                            variant="minimal"
+                        />
+                    ) : (
+                        tasks.slice(0, 20).map((task) => (
+                            <div key={task.id} className="p-3 bg-gray-800/50 rounded-lg border border-gray-800">
+                                <div className="flex items-start justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-medium text-gray-400 capitalize">
+                                            {task.action.replace('_', ' ')}
+                                        </span>
+                                        <span className={clsx(
+                                            "text-xs px-2 py-0.5 rounded-full",
+                                            task.status === 'completed' ? "bg-green-500/10 text-green-400" :
+                                                task.status === 'failed' ? "bg-red-500/10 text-red-400" :
+                                                    "bg-blue-500/10 text-blue-400"
+                                        )}>
+                                            {task.status}
+                                        </span>
+                                    </div>
+                                    <span className="text-xs text-gray-500">{formatDate(task.createdAt)}</span>
+                                </div>
+                                {task.error && (
+                                    <div className="mt-2 p-2 bg-red-500/10 border border-red-500/20 rounded text-xs text-red-400">
+                                        Error: {task.error}
+                                    </div>
+                                )}
+                                {task.completedAt && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Completed: {formatDate(task.completedAt)}
+                                    </p>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+    ), [tasks]);
 
     const configContent = useMemo(() => (
         <div className="space-y-6">
@@ -237,9 +357,11 @@ const SalesAgent = () => {
             description="Automates lead qualification, email outreach, and meeting scheduling."
             icon={DollarSign}
             color="bg-blue-500"
+            lastActivity={lastActivity}
             overviewContent={overviewContent}
             conversationsContent={conversationsContent}
             skillsContent={skillsContent}
+            logsContent={logsContent}
             configContent={configContent}
         />
     );
