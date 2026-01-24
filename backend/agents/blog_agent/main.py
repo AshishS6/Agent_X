@@ -35,6 +35,8 @@ Your role is to help marketing teams create high-quality blog content by:
 - Maintaining brand voice and tone consistency
 - Targeting specific audiences effectively
 
+**Language: Always write all output in English only.** All titles, headings, section intents, and body text must be in English. Never use any other language.
+
 Guidelines:
 - Be professional, clear, and engaging
 - Follow brand guidelines (OPEN brand: technical, detailed | Zwitch brand: friendly, accessible)
@@ -124,6 +126,8 @@ Topic: {topic}
 Target Audience: {target_audience} ({audience_guidance.get(target_audience.upper(), "")})
 Intent: {intent} ({intent_guidance.get(intent.lower(), "")})
 
+**Important: Write the entire outline in English only.** All titles, headings, section intents, and descriptions must be in English.
+
 Please provide:
 1. A compelling title (H1) - should be engaging and SEO-friendly
 2. A structured outline with:
@@ -131,7 +135,8 @@ Please provide:
    - H3 subsections (as needed)
    - One-line intent for each section describing what that section should cover
 
-Format your response as a JSON object with this structure:
+Format your response as a valid JSON object. Use a comma after every key-value pair (including after "intent" when followed by "subsections"). Example:
+
 {{
     "title": "Blog Title Here",
     "outline": [
@@ -144,11 +149,15 @@ Format your response as a JSON object with this structure:
                     "intent": "What this subsection covers"
                 }}
             ]
+        }},
+        {{
+            "heading": "Another Section Without Subsections",
+            "intent": "What this section covers"
         }}
     ]
 }}
 
-Return only valid JSON, no additional text."""
+Sections may omit "subsections" if not needed. Return only valid JSON, no other text."""
         
         # Get LLM response
         from langchain.schema import HumanMessage, SystemMessage
@@ -172,6 +181,9 @@ Return only valid JSON, no additional text."""
             if json_match:
                 response_text = json_match.group(0)
         
+        # Repair common LLM JSON mistakes (e.g. missing comma between "intent" and "subsections")
+        response_text = self._repair_outline_json(response_text)
+        
         try:
             outline_data = json.loads(response_text)
         except json.JSONDecodeError as e:
@@ -190,6 +202,17 @@ Return only valid JSON, no additional text."""
                 "intent": intent
             }
         }
+    
+    def _repair_outline_json(self, raw: str) -> str:
+        """Fix common LLM JSON mistakes before parsing (e.g. missing commas)."""
+        # Missing comma between "intent": "..." and "subsections": [...]
+        # Pattern: "intent": "..." newline "subsections" -> add comma after "..."
+        raw = re.sub(
+            r'("intent":\s*"(?:[^"\\]|\\.)*")(\s*\n\s*)("subsections")',
+            r'\1,\2\3',
+            raw,
+        )
+        return raw
     
     def _generate_post_from_outline(self, task) -> Dict[str, Any]:
         """Generate a full blog draft from an outline"""
@@ -238,6 +261,8 @@ Return only valid JSON, no additional text."""
 Brand: {brand}
 Tone: {tone}
 Target Length: {length} ({length_guidance.get(length.lower(), "medium length")})
+
+**Important: Write the entire blog post in English only.** All content must be in English.
 
 OUTLINE:
 {outline_text}
@@ -343,17 +368,9 @@ Return only valid JSON, no additional text."""
 
 # Factory function to create blog agent instance
 def create_blog_agent(llm_provider: str = "openai") -> BlogAgent:
-    """Factory function to create blog agent"""
-    # Determine model based on provider
-    if llm_provider == "openai":
-        model = "gpt-4-turbo-preview"
-    elif llm_provider == "anthropic":
-        model = "claude-3-sonnet-20240229"
-    elif llm_provider == "ollama":
-        import os
-        model = os.getenv("LLM_MODEL", "deepseek-r1:7b")
-    else:
-        model = "gpt-3.5-turbo"  # Fallback
+    """Factory function to create blog agent. LLM provider/model selection is via router (env: LLM_*)."""
+    import os
+    model = os.getenv("LLM_LOCAL_MODEL") or os.getenv("LLM_CLOUD_MODEL") or ""
 
     config = AgentConfig(
         agent_type="blog",

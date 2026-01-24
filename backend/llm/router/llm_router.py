@@ -509,16 +509,34 @@ class LLMRouter:
                 if model_preference and provider_name == preferred_provider:
                     model_id = self.registry.parse_model_id(provider_name, preferred_model)
                 else:
-                    # Get default model for provider
-                    model_info = self.registry.get_default_model_for_provider(provider, intent)
-                    if not model_info:
+                    # Use LLM_LOCAL_MODEL / LLM_CLOUD_MODEL when set; else registry default
+                    if provider_name == "ollama":
+                        default_val = (self.default_local_model or "").strip()
+                        if default_val:
+                            # Allow "llama3.1:8b" or "ollama:llama3.1:8b"
+                            model_id = default_val if default_val.startswith("ollama:") else self.registry.parse_model_id("ollama", default_val)
+                        else:
+                            model_id = None
+                        if not model_id:
+                            reg = self.registry.get_default_model_for_provider(provider, intent)
+                            model_id = reg.id if reg else None
+                    elif provider_name in ("openai", "anthropic"):
+                        dc = (self.default_cloud_model or "").strip()
+                        if dc.startswith(f"{provider_name}:"):
+                            model_id = dc
+                        else:
+                            reg = self.registry.get_default_model_for_provider(provider, intent)
+                            model_id = reg.id if reg else None
+                    else:
+                        reg = self.registry.get_default_model_for_provider(provider, intent)
+                        model_id = reg.id if reg else None
+                    if not model_id:
                         if self.fallback_enabled and provider_name != candidate_providers[-1]:
                             fallback_used = True
                             fallback_reason = f"No suitable model for {provider_name}"
                             continue
                         else:
                             raise ValueError(f"No model available for provider {provider_name}")
-                    model_id = model_info.id
                 
                 # Verify model exists
                 model_info = self.registry.get_model(model_id)

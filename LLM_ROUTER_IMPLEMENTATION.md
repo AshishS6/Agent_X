@@ -90,12 +90,12 @@ llm = router.get_chat_client(
 
 ### For Assistants (Direct API)
 ```python
-# In assistants/runner.py
+# In assistants/runner.py; model_preference from assistant config (env: LLM_LOCAL_MODEL)
 router = get_router()
 result = await router.generate_completion(
     caller="fintech_assistant",
     prompt=full_prompt,
-    model_preference="qwen2.5:7b-instruct",
+    model_preference=config.model,  # from env or default
     intent=Intent.ANALYSIS
 )
 response_text = result["text"]
@@ -114,8 +114,32 @@ usage = result["usage"]  # Contains tokens, cost, latency
 - ✅ Health checks implemented
 - ✅ Configuration centralized
 - ✅ Backward compatibility preserved
-- ✅ No hardcoded models
+- ✅ No hardcoded models (see Audit below)
 - ✅ Extensive logging
+
+## 🔎 Router & Hardcoding Audit
+
+**All chat/completion LLM usage is routed through the router.**
+
+| Component | Entry point | Model / provider source |
+|-----------|-------------|--------------------------|
+| **Agents** (blog, market_research, sales) | `BaseAgent._create_llm()` → `get_router().get_chat_client()` | `model_preference` from `LLM_LOCAL_MODEL` or `LLM_CLOUD_MODEL` (env); empty → router defaults |
+| **Assistants** | `runner.run_assistant()` → `get_router().generate_completion()` | `config.model` from `LLM_LOCAL_MODEL` env or default `qwen2.5:7b-instruct` |
+| **Router** | `llm_router.py` | `LLM_MODE`, `LLM_PRIORITY`, `LLM_LOCAL_MODEL`, `LLM_CLOUD_MODEL` (env). Registry: `model_registry.py` (canonical model list). |
+| **Go** (executor, assistants handler) | Pass `LLM_*`, `OLLAMA_BASE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` to Python | Env vars only; no hardcoded keys or URLs |
+
+**No hardcoded LLM details in application code.**
+
+- **Agent factories** (`create_blog_agent`, `create_market_research_agent`, `create_sales_agent`): Use `LLM_LOCAL_MODEL` / `LLM_CLOUD_MODEL` env; no provider→model mapping.
+- **AgentConfig**: `model` default `""`; router uses env when empty.
+- **Assistants** (`fintech`, `code`, `general`): `get_config()` uses `LLM_LOCAL_MODEL` env, fallback `qwen2.5:7b-instruct`.
+- **Router** defaults: `LLM_LOCAL_MODEL` / `LLM_CLOUD_MODEL` env with fallbacks; API keys and `OLLAMA_BASE_URL` from env only.
+- **Model registry** (`model_registry.py`): Defines available models; no API keys or URLs. Add new models there.
+
+**Out of scope (by design):**
+
+- **Embeddings** (`OllamaEmbeddingClient`): Used for RAG only; not chat. Uses `OLLAMA_BASE_URL` env.
+- **`.env` / `.env.example`**: Example values (e.g. `qwen2.5:7b-instruct`) are documentation, not runtime defaults in code.
 
 ## 🧪 Testing
 
@@ -197,6 +221,13 @@ LLM_FALLBACK_ENABLED=false
 1. Is Ollama running? `ollama serve`
 2. Is `OLLAMA_BASE_URL` correct?
 3. Check health: Router logs will show provider status
+
+### Issue: Changing `LLM_LOCAL_MODEL` in `.env` has no effect
+**Causes**:
+1. **Router never used env defaults** – Previously the router read `LLM_LOCAL_MODEL` / `LLM_CLOUD_MODEL` but always picked the first registry model. This is fixed: default model selection now uses these env vars.
+2. **Model not in registry** – The chosen model (e.g. `llama3.1:8b`) must exist in `model_registry.py`. Add it if you use a local model not yet registered.
+3. **Typo** – Use `llama3.1:8b` (double “l”), not `lama3.1:8b`.
+4. **Backend not restarted** – The Go server loads `backend/.env` at startup. Restart the backend (`make dev` or `go run ./cmd/server`) after changing `.env`. Python agents receive env from Go when run via the API.
 
 ### Issue: No usage tracking
 **Check**:

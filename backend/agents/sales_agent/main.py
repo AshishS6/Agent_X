@@ -135,17 +135,9 @@ Respond with structured, actionable output."""
 
 # Create default sales agent instance
 def create_sales_agent(llm_provider: str = "openai") -> SalesAgent:
-    """Factory function to create sales agent"""
-    # Determine model based on provider
-    if llm_provider == "openai":
-        model = "gpt-4-turbo-preview"
-    elif llm_provider == "anthropic":
-        model = "claude-3-sonnet-20240229"
-    elif llm_provider == "ollama":
-        import os
-        model = os.getenv("LLM_MODEL", "deepseek-r1:7b")
-    else:
-        model = "gpt-3.5-turbo"  # Fallback
+    """Factory function to create sales agent. LLM provider/model via router (env: LLM_*)."""
+    import os
+    model = os.getenv("LLM_LOCAL_MODEL") or os.getenv("LLM_CLOUD_MODEL") or ""
 
     config = AgentConfig(
         agent_type="sales",

@@ -116,6 +116,16 @@ class ModelRegistry:
             recommended_intents=[Intent.CHAT, Intent.CODE],
             is_local=True
         ))
+        self._register_model(ModelInfo(
+            id="ollama:llama3.1:8b",
+            provider=Provider.OLLAMA,
+            name="Llama 3.1 8B",
+            context_limit=128000,
+            input_price_per_1k=0.0,
+            output_price_per_1k=0.0,
+            recommended_intents=[Intent.CHAT, Intent.CODE, Intent.ANALYSIS],
+            is_local=True
+        ))
         
         # Mistral models
         self._register_model(ModelInfo(

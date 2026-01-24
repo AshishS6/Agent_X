@@ -6,6 +6,9 @@ Extracted from Local-LLM project (backend/local_llm_staging/backend/assistants/g
 This assistant is configured for general-purpose questions without RAG support.
 """
 
+import os
+from typing import Optional
+
 from .base_assistant import AssistantConfig
 
 
@@ -18,16 +21,10 @@ class GeneralAssistant:
     """
     
     @staticmethod
-    def get_config(model: str = "qwen2.5:7b-instruct") -> AssistantConfig:
-        """
-        Get general assistant configuration
-        
-        Args:
-            model: Model to use (defaults to qwen2.5:7b)
-            
-        Returns:
-            AssistantConfig instance
-        """
+    def get_config(model: Optional[str] = None) -> AssistantConfig:
+        """Model defaults to LLM_LOCAL_MODEL env var or qwen2.5:7b-instruct."""
+        if model is None:
+            model = os.getenv("LLM_LOCAL_MODEL", "qwen2.5:7b-instruct")
         return AssistantConfig(
             name="General Assistant",
             model=model,

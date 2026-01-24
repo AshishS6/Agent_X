@@ -35,8 +35,8 @@ class AgentConfig(BaseModel):
     agent_type: str
     name: str
     description: str
-    llm_provider: str = "openai"  # openai, anthropic, ollama
-    model: str = "gpt-4-turbo-preview"
+    llm_provider: str = "openai"  # legacy; router uses LLM_MODE / LLM_PRIORITY
+    model: str = ""  # optional preference; router uses LLM_LOCAL_MODEL / LLM_CLOUD_MODEL when empty
     temperature: float = 0.7
     max_tokens: int = 2000
     tools: List[str] = Field(default_factory=list)
