@@ -138,16 +138,16 @@ const DashboardHome = () => {
                 <StatCard
                     title="Time Saved"
                     value={formatDuration(metrics?.timeSaved.value || metrics?.timeSaved.hours)}
-                    subLabel="Est. human hours saved this period"
-                    trend={15}
+                    subLabel="Est. hours saved (5 min per completed task)"
+                    trend={metrics?.tasksCompleted.trend}
                     icon={Clock}
                     color="bg-purple-500"
                 />
                 <StatCard
                     title="Efficiency Score"
                     value={formatPercentage(metrics?.efficiencyScore.value || metrics?.efficiencyScore.score, 1, false)}
-                    subLabel="Weighted across all agents"
-                    trend={2.5}
+                    subLabel="Completed vs total tasks"
+                    trend={undefined}
                     icon={TrendingUp}
                     color="bg-orange-500"
                 />

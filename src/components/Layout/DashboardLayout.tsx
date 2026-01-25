@@ -9,7 +9,7 @@ const DashboardLayout = () => {
     const location = useLocation();
 
     // Show breadcrumb for non-agent pages (agent pages have their own in AgentLayout)
-    const isAgentPage = ['/sales', '/support', '/hr', '/market-research', '/marketing', '/blog', '/leads', '/intelligence', '/legal', '/finance'].includes(location.pathname);
+    const isAgentPage = ['/sales', '/support', '/hr', '/market-research', '/blog', '/intelligence', '/legal', '/finance', '/operations/site-scan'].includes(location.pathname);
 
     return (
         <div className="flex h-screen bg-gray-950 overflow-hidden font-sans">

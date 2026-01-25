@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
     LayoutDashboard,
     Briefcase,
@@ -17,10 +17,12 @@ import {
     Database,
     Settings,
     ChevronRight,
+    ChevronDown,
     X,
     MessageSquare,
     Code,
-    Sparkles
+    Sparkles,
+    Globe
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -33,6 +35,7 @@ interface NavItem {
 interface NavSection {
     title: string;
     items: NavItem[];
+    collapsible?: boolean;
 }
 
 interface SidebarProps {
@@ -41,6 +44,26 @@ interface SidebarProps {
 }
 
 const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
+    const location = useLocation();
+    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['Sales', 'Marketing', 'Operations']));
+
+    const toggleSection = (sectionTitle: string) => {
+        setExpandedSections(prev => {
+            const next = new Set(prev);
+            if (next.has(sectionTitle)) {
+                next.delete(sectionTitle);
+            } else {
+                next.add(sectionTitle);
+            }
+            return next;
+        });
+    };
+
+    // Check if any item in a section is active
+    const isSectionActive = (items: NavItem[]) => {
+        return items.some(item => location.pathname === item.path || location.pathname.startsWith(item.path + '/'));
+    };
+
     const navSections: NavSection[] = [
         {
             title: 'Overview',
@@ -57,15 +80,36 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
             ]
         },
         {
-            title: 'Agents',
+            title: 'Sales',
+            collapsible: true,
             items: [
-                { path: '/sales', label: 'Sales Agent', icon: Briefcase },
+                { path: '/sales/overview', label: 'Overview', icon: LayoutDashboard },
+                { path: '/sales', label: 'Lead qualification & outreach', icon: Target },
+            ]
+        },
+        {
+            title: 'Marketing',
+            collapsible: true,
+            items: [
+                { path: '/marketing/overview', label: 'Overview', icon: LayoutDashboard },
+                { path: '/blog', label: 'Blog / Content Generation', icon: FileText },
+                { path: '/market-research', label: 'Market Research', icon: TrendingUp },
+            ]
+        },
+        {
+            title: 'Operations',
+            collapsible: true,
+            items: [
+                { path: '/operations/overview', label: 'Overview', icon: LayoutDashboard },
+                { path: '/operations/site-scan', label: 'Site Scan', icon: Globe },
+            ]
+        },
+        {
+            title: 'Other Agents',
+            collapsible: true,
+            items: [
                 { path: '/support', label: 'Support Agent', icon: LifeBuoy },
                 { path: '/hr', label: 'HR Agent', icon: Users },
-                { path: '/market-research', label: 'Market Research', icon: TrendingUp },
-                { path: '/marketing', label: 'Marketing', icon: Megaphone },
-                { path: '/blog', label: 'Blog Agent', icon: FileText },
-                { path: '/leads', label: 'Lead Sourcing', icon: Target },
                 { path: '/intelligence', label: 'Intelligence', icon: Newspaper },
                 { path: '/legal', label: 'Legal', icon: Scale },
                 { path: '/finance', label: 'Finance', icon: DollarSign },
@@ -113,42 +157,71 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
                 </div>
 
                 <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-6 custom-scrollbar">
-                    {navSections.map((section) => (
-                        <div key={section.title}>
-                            <h3 className="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                                {section.title}
-                            </h3>
-                            <div className="space-y-1">
-                                {section.items.map((item) => (
-                                    <NavLink
-                                        key={item.path}
-                                        to={item.path}
-                                        onClick={() => {
-                                            if (window.innerWidth < 768) onClose();
-                                        }}
-                                        className={({ isActive }) =>
-                                            clsx(
-                                                'flex items-center justify-between px-4 py-2.5 rounded-lg transition-all duration-200 group',
-                                                isActive
-                                                    ? 'bg-blue-600/10 text-blue-400'
-                                                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-                                            )
-                                        }
-                                    >
-                                        {({ isActive }) => (
-                                            <>
-                                                <div className="flex items-center gap-3">
-                                                    <item.icon size={18} className={isActive ? 'text-blue-400' : 'text-gray-500 group-hover:text-white transition-colors'} />
-                                                    <span className="text-sm font-medium">{item.label}</span>
-                                                </div>
-                                                {isActive && <ChevronRight size={14} className="text-blue-400" />}
-                                            </>
+                    {navSections.map((section) => {
+                        const isExpanded = expandedSections.has(section.title);
+                        const isActive = isSectionActive(section.items);
+                        const showCollapsible = section.collapsible;
+
+                        return (
+                            <div key={section.title}>
+                                {showCollapsible ? (
+                                    <button
+                                        onClick={() => toggleSection(section.title)}
+                                        className={clsx(
+                                            'w-full flex items-center justify-between px-4 py-2 mb-2 rounded-lg transition-all duration-200',
+                                            isActive
+                                                ? 'bg-blue-600/10 text-blue-400'
+                                                : 'text-gray-500 hover:bg-gray-800 hover:text-white'
                                         )}
-                                    </NavLink>
-                                ))}
+                                    >
+                                        <h3 className="text-xs font-semibold uppercase tracking-wider">
+                                            {section.title}
+                                        </h3>
+                                        {isExpanded ? (
+                                            <ChevronDown size={14} />
+                                        ) : (
+                                            <ChevronRight size={14} />
+                                        )}
+                                    </button>
+                                ) : (
+                                    <h3 className="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                                        {section.title}
+                                    </h3>
+                                )}
+                                {(!showCollapsible || isExpanded) && (
+                                    <div className="space-y-1">
+                                        {section.items.map((item) => (
+                                            <NavLink
+                                                key={item.path}
+                                                to={item.path}
+                                                onClick={() => {
+                                                    if (window.innerWidth < 768) onClose();
+                                                }}
+                                                className={({ isActive }) =>
+                                                    clsx(
+                                                        'flex items-center justify-between px-4 py-2.5 rounded-lg transition-all duration-200 group ml-2',
+                                                        isActive
+                                                            ? 'bg-blue-600/10 text-blue-400'
+                                                            : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                                    )
+                                                }
+                                            >
+                                                {({ isActive }) => (
+                                                    <>
+                                                        <div className="flex items-center gap-3">
+                                                            <item.icon size={18} className={isActive ? 'text-blue-400' : 'text-gray-500 group-hover:text-white transition-colors'} />
+                                                            <span className="text-sm font-medium">{item.label}</span>
+                                                        </div>
+                                                        {isActive && <ChevronRight size={14} className="text-blue-400" />}
+                                                    </>
+                                                )}
+                                            </NavLink>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </nav>
 
                 <div className="p-4 border-t border-gray-800">

@@ -21,16 +21,20 @@ export const Breadcrumb: React.FC<{ currentTab?: string }> = ({ currentTab }) =>
         '/assistants/fintech': 'Fintech Assistant',
         '/assistants/code': 'Code Assistant',
         '/assistants/general': 'General Assistant',
-        '/sales': 'Sales Agent',
+        '/sales': 'Lead qualification & outreach',
+        '/sales/overview': 'Sales Overview',
         '/support': 'Support Agent',
         '/hr': 'HR Agent',
-        '/market-research': 'Market Research Agent',
-        '/marketing': 'Marketing Agent',
-        '/blog': 'Blog Agent',
-        '/leads': 'Lead Sourcing Agent',
+        '/market-research': 'Market Research',
+        '/marketing': 'Marketing',
+        '/marketing/overview': 'Marketing Overview',
+        '/blog': 'Blog / Content Generation',
+        '/leads': 'Lead qualification & outreach',
         '/intelligence': 'Intelligence Agent',
         '/legal': 'Legal Agent',
         '/finance': 'Finance Agent',
+        '/operations/overview': 'Operations Overview',
+        '/operations/site-scan': 'Site Scan',
         '/workflows': 'Workflows',
         '/activity': 'Activity & Logs',
         '/data': 'Data & Integrations',
@@ -72,8 +76,92 @@ export const Breadcrumb: React.FC<{ currentTab?: string }> = ({ currentTab }) =>
             return items;
         }
 
-        // Handle agents
-        const agentRoutes = ['sales', 'support', 'hr', 'market-research', 'marketing', 'blog', 'leads', 'intelligence', 'legal', 'finance'];
+        // Handle domain-based navigation (Sales, Marketing, Operations)
+        if (pathSegments[0] === 'sales') {
+            items.push({
+                label: 'Sales',
+                path: '/sales/overview',
+            });
+            if (pathSegments[1] === 'overview') {
+                // Already added Sales, overview is current
+                return items;
+            }
+            const agentLabel = routeLabels[location.pathname] || 'Lead Sourcing Agent';
+            items.push({
+                label: agentLabel,
+                path: location.pathname,
+            });
+            
+            // Add tab if provided and not "overview" (default)
+            if (currentTab && currentTab !== 'overview' && tabLabels[currentTab]) {
+                items.push({
+                    label: tabLabels[currentTab],
+                    path: location.pathname,
+                });
+            }
+            return items;
+        }
+
+        if (pathSegments[0] === 'marketing') {
+            items.push({
+                label: 'Marketing',
+                path: '/marketing/overview',
+            });
+            if (pathSegments[1] === 'overview') {
+                return items;
+            }
+            const agentLabel = routeLabels[location.pathname] || pathSegments[1] || 'Marketing';
+            items.push({
+                label: agentLabel,
+                path: location.pathname,
+            });
+            return items;
+        }
+
+        if (pathSegments[0] === 'operations') {
+            items.push({
+                label: 'Operations',
+                path: '/operations/overview',
+            });
+            if (pathSegments[1] === 'overview') {
+                return items;
+            }
+            const agentLabel = routeLabels[location.pathname] || pathSegments[1] || 'Operations';
+            items.push({
+                label: agentLabel,
+                path: location.pathname,
+            });
+            return items;
+        }
+
+        // Handle market-research (under Marketing domain)
+        if (pathSegments[0] === 'market-research') {
+            items.push({
+                label: 'Marketing',
+                path: '/marketing/overview',
+            });
+            items.push({
+                label: 'Market Research',
+                path: location.pathname,
+            });
+            return items;
+        }
+
+        // Handle blog (under Marketing domain)
+        if (pathSegments[0] === 'blog') {
+            items.push({
+                label: 'Marketing',
+                path: '/marketing/overview',
+            });
+            items.push({
+                label: 'Content / Blog Agent',
+                path: location.pathname,
+            });
+            return items;
+        }
+
+        // Handle other agents (legacy flat structure)
+        const agentRoutes = ['support', 'hr', 'leads', 'intelligence', 'legal', 'finance'];
         if (agentRoutes.includes(pathSegments[0])) {
             items.push({
                 label: 'Agents',
@@ -89,7 +177,7 @@ export const Breadcrumb: React.FC<{ currentTab?: string }> = ({ currentTab }) =>
             if (currentTab && currentTab !== 'overview' && tabLabels[currentTab]) {
                 items.push({
                     label: tabLabels[currentTab],
-                    path: location.pathname, // Current page, non-clickable
+                    path: location.pathname,
                 });
             }
             return items;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { DollarSign, Users, Filter, Search, Play, Loader2, FileText } from 'lucide-react';
+import { DollarSign, Users, Filter, Search, Play, Loader2, FileText, CheckCircle, Mail, MessageSquare } from 'lucide-react';
 import AgentLayout from '../components/Layout/AgentLayout';
 import { AgentService, TaskService, Task, AgentMetrics } from '../services/api';
 import { formatNumber, formatPercentage } from '../utils/formatting';
@@ -83,8 +83,70 @@ const SalesAgent = () => {
         return sortedTasks[0]?.completedAt || sortedTasks[0]?.createdAt;
     }, [tasks]);
 
-    const overviewContent = useMemo(() => (
+    const overviewContent = useMemo(() => {
+        const tasks = [
+            {
+                id: 'qualify',
+                title: 'Lead Qualification',
+                description: 'Score and qualify leads based on company data',
+                icon: CheckCircle,
+                color: 'bg-green-500',
+                action: 'qualify_lead',
+                available: true
+            },
+            {
+                id: 'outreach',
+                title: 'Outreach Email',
+                description: 'Generate personalized outreach emails',
+                icon: Mail,
+                color: 'bg-blue-500',
+                action: 'generate_email',
+                available: true
+            },
+            {
+                id: 'followup',
+                title: 'Follow-up Generation',
+                description: 'Create follow-up emails based on previous interactions',
+                icon: MessageSquare,
+                color: 'bg-purple-500',
+                action: 'generate_followup',
+                available: false,
+                comingSoon: true
+            }
+        ];
+
+        return (
         <div className="space-y-6">
+            {/* What do you want to do? */}
+            <div>
+                <h2 className="text-lg font-semibold text-white mb-4">What do you want to do?</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {tasks.map((task) => (
+                        <div
+                            key={task.id}
+                            className={`bg-gray-900 p-4 rounded-xl border border-gray-800 transition-all ${
+                                task.available 
+                                    ? 'hover:border-gray-700 cursor-pointer' 
+                                    : 'opacity-60 cursor-not-allowed'
+                            }`}
+                        >
+                            <div className="flex items-start justify-between mb-3">
+                                <div className={`p-2 rounded-lg ${task.color} bg-opacity-10`}>
+                                    <task.icon className={`w-5 h-5 ${task.color.replace('bg-', 'text-')}`} />
+                                </div>
+                                {task.comingSoon && (
+                                    <span className="text-xs px-2 py-1 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
+                                        Coming soon
+                                    </span>
+                                )}
+                            </div>
+                            <h3 className="text-base font-bold text-white mb-1">{task.title}</h3>
+                            <p className="text-xs text-gray-400">{task.description}</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+
             {/* KPI Strip */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[
@@ -190,7 +252,8 @@ const SalesAgent = () => {
                 </div>
             </div>
         </div>
-    ), [metrics, tasks, agentId, handleTaskCreated, fetchTasks, tasksPage, tasksTotal, tasksTotalPages]);
+        );
+    }, [metrics, tasks, agentId, handleTaskCreated, fetchTasks, tasksPage, tasksTotal, tasksTotalPages]);
 
     const conversationsContent = useMemo(() => (
         <div className="w-full flex-1 min-h-0 flex flex-col bg-gray-900 rounded-xl border border-gray-800">
@@ -242,30 +305,38 @@ const SalesAgent = () => {
     ), [tasks]);
 
     const skillsContent = useMemo(() => (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[
-                { title: 'Lead Qualification', desc: 'Analyzes company data to score leads.', tools: ['LinkedIn API', 'Clearbit', 'CRM'] },
-                { title: 'Email Drafting', desc: 'Generates personalized outreach emails.', tools: ['OpenAI', 'Gmail API'] },
-                { title: 'Meeting Scheduling', desc: 'Finds times and sends invites.', tools: ['Google Calendar', 'Calendly'] },
-                { title: 'CRM Sync', desc: 'Updates deal stages and notes.', tools: ['Salesforce', 'HubSpot'] },
-            ].map((skill, i) => (
-                <div key={i} className="bg-gray-900 p-6 rounded-xl border border-gray-800 hover:border-gray-700 transition-colors">
-                    <div className="flex justify-between items-start mb-4">
-                        <h3 className="text-lg font-bold text-white">{skill.title}</h3>
-                        <div className="bg-blue-500/10 p-2 rounded-lg">
-                            <Users className="text-blue-400" size={20} />
+        <div className="space-y-4">
+            <h3 className="text-lg font-bold text-white mb-4">Capabilities</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {[
+                    { title: 'Lead Sourcing', desc: 'Discovers and identifies potential leads based on criteria and signals.', tools: ['Data Sources', 'Signal Detection'], comingSoon: true },
+                    { title: 'Lead Qualification', desc: 'Analyzes company data to score leads.', tools: ['LinkedIn API', 'Clearbit', 'CRM'] },
+                    { title: 'Outreach', desc: 'Generates personalized outreach emails.', tools: ['OpenAI', 'Gmail API'] },
+                    { title: 'Follow-ups', desc: 'Automates follow-up sequences and meeting scheduling.', tools: ['Google Calendar', 'Calendly', 'CRM'] },
+                ].map((skill, i) => (
+                    <div key={i} className="bg-gray-900 p-6 rounded-xl border border-gray-800 hover:border-gray-700 transition-colors">
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 className="text-lg font-bold text-white">{skill.title}</h3>
+                                {skill.comingSoon && (
+                                    <span className="text-xs text-gray-500 mt-1">Coming soon</span>
+                                )}
+                            </div>
+                            <div className="bg-blue-500/10 p-2 rounded-lg">
+                                <Users className="text-blue-400" size={20} />
+                            </div>
+                        </div>
+                        <p className="text-gray-400 mb-4">{skill.desc}</p>
+                        <div className="flex flex-wrap gap-2">
+                            {skill.tools.map((tool) => (
+                                <span key={tool} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded-md border border-gray-700">
+                                    {tool}
+                                </span>
+                            ))}
                         </div>
                     </div>
-                    <p className="text-gray-400 mb-4">{skill.desc}</p>
-                    <div className="flex flex-wrap gap-2">
-                        {skill.tools.map((tool) => (
-                            <span key={tool} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded-md border border-gray-700">
-                                {tool}
-                            </span>
-                        ))}
-                    </div>
-                </div>
-            ))}
+                ))}
+            </div>
         </div>
     ), []);
 
@@ -353,8 +424,8 @@ const SalesAgent = () => {
 
     return (
         <AgentLayout
-            name="Sales Agent"
-            description="Automates lead qualification, email outreach, and meeting scheduling."
+            name="Lead Sourcing Agent"
+            description="Sources leads, qualifies prospects, and automates outreach & follow-ups."
             icon={DollarSign}
             color="bg-blue-500"
             lastActivity={lastActivity}
