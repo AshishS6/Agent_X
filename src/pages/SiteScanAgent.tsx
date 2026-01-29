@@ -310,11 +310,10 @@ const SiteScanAgent = () => {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-white mb-1">Site Scan</h1>
-                    <p className="text-gray-400 text-sm">Comprehensive website analysis for compliance, risk assessment, and structural insights</p>
-                </div>
+            <div className="flex items-center justify-between gap-4">
+                <p className="text-gray-400 text-sm max-w-2xl">
+                    Comprehensive website analysis for compliance, risk assessment, and structural insights.
+                </p>
                 <button
                     onClick={() => setIsModalOpen(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors"

@@ -74,7 +74,6 @@ const SalesOverview = () => {
         <div className="space-y-6">
             {/* Header */}
             <div>
-                <h1 className="text-2xl font-bold text-white mb-2">Sales</h1>
                 <p className="text-gray-400 text-sm max-w-2xl">
                     Acquire, qualify, and convert leads. Use the tasks below to qualify prospects, generate outreach emails, and manage follow-ups.
                 </p>

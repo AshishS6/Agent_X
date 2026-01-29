@@ -12,7 +12,7 @@ interface BreadcrumbItem {
  * Automatically generates breadcrumbs based on current route
  * Example: "Home > Agents > Sales Agent"
  */
-export const Breadcrumb: React.FC<{ currentTab?: string }> = ({ currentTab }) => {
+export const Breadcrumb: React.FC<{ currentTab?: string; className?: string }> = ({ currentTab, className }) => {
     const location = useLocation();
 
     // Map route paths to human-readable labels
@@ -155,8 +155,14 @@ export const Breadcrumb: React.FC<{ currentTab?: string }> = ({ currentTab }) =>
             });
             items.push({
                 label: 'Content / Blog Agent',
-                path: location.pathname,
+                path: '/blog',
             });
+            if (pathSegments.length > 1) {
+                items.push({
+                    label: 'Blog Editor',
+                    path: location.pathname,
+                });
+            }
             return items;
         }
 
@@ -216,7 +222,7 @@ export const Breadcrumb: React.FC<{ currentTab?: string }> = ({ currentTab }) =>
     }
 
     return (
-        <nav className="flex items-center gap-2 text-sm mb-4" aria-label="Breadcrumb">
+        <nav className={`flex items-center gap-2 text-sm ${className || ''}`} aria-label="Breadcrumb">
             {breadcrumbs.map((item, index) => {
                 const isLast = index === breadcrumbs.length - 1;
                 const isNonClickable = item.path === '#';

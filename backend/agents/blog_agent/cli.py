@@ -143,7 +143,7 @@ Examples:
             sys.exit(1)
         
         # Validate action
-        valid_actions = ["generate_outline", "generate_post_from_outline"]
+        valid_actions = ["generate_outline", "generate_post_from_outline", "generate_outline_v2", "generate_draft_v2"]
         if action not in valid_actions:
             error_result = create_output(
                 status="failed",

@@ -109,7 +109,6 @@ const ActivityLogs = () => {
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-white mb-1">Activity & Logs</h1>
                     <p className="text-gray-400 text-sm">Audit trail of all agent and system activities</p>
                 </div>
                 <div className="flex items-center gap-3">

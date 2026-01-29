@@ -195,7 +195,6 @@ const Integrations = () => {
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-white mb-1">Data & Integrations</h1>
                     <p className="text-gray-400 text-sm">Manage connections to external tools and services</p>
                 </div>
                 <button

@@ -92,7 +92,6 @@ const MarketingOverview = () => {
         <div className="space-y-6">
             {/* Header */}
             <div>
-                <h1 className="text-2xl font-bold text-white mb-2">Marketing</h1>
                 <p className="text-gray-400 text-sm max-w-2xl">
                     Generate content and market intelligence. Create blog posts and conduct market research to inform your marketing strategy.
                 </p>

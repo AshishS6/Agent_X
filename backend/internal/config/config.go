@@ -42,7 +42,8 @@ func Load() *Config {
 		OpenAIAPIKey:                getEnv("OPENAI_API_KEY", ""),
 		MarketResearchTimeout:       getEnvDuration("MARKET_RESEARCH_TIMEOUT", 10*time.Minute),
 		SalesAgentTimeout:           getEnvDuration("SALES_AGENT_TIMEOUT", 3*time.Minute),
-		BlogAgentTimeout:            getEnvDuration("BLOG_AGENT_TIMEOUT", 5*time.Minute),
+		// Blog generation with local models + RAG can be slow; avoid premature timeouts.
+		BlogAgentTimeout:            getEnvDuration("BLOG_AGENT_TIMEOUT", 25*time.Minute),
 	}
 
 	AppConfig = config

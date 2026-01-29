@@ -17,6 +17,12 @@ interface AssistantChatProps {
   knowledgeBase: string;
   title: string;
   description: string;
+  headerSlot?: React.ReactNode;
+  showHeader?: boolean;
+  composerLeftSlot?: React.ReactNode;
+  introTitle?: string;
+  introDescription?: string;
+  samplePrompts?: string[];
 }
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
@@ -26,6 +32,12 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
   knowledgeBase,
   title,
   description,
+  headerSlot,
+  showHeader = true,
+  composerLeftSlot,
+  introTitle,
+  introDescription,
+  samplePrompts,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -33,6 +45,7 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const copyToClipboard = async (text: string, codeId: string) => {
     try {
@@ -103,19 +116,61 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-gray-950 rounded-xl border border-gray-800 overflow-hidden">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-800 bg-gray-900 flex-shrink-0">
-        <h1 className="text-2xl font-bold text-white mb-2">{title}</h1>
-        <p className="text-sm text-gray-400">{description}</p>
-      </div>
+      {/* Header (optional) */}
+      {(showHeader || headerSlot) && (
+        <div className="p-4 border-b border-gray-800 bg-gray-900 flex-shrink-0">
+          {headerSlot}
+          {showHeader && (
+            <div className={clsx(headerSlot ? 'mt-3' : '')}>
+              <h2 className="text-xl font-semibold text-white">{title}</h2>
+              <p className="text-sm text-gray-400 mt-1">{description}</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Messages Area - Takes remaining space */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar min-h-0">
         {messages.length === 0 && (
-          <div className="text-center text-gray-500 mt-12">
-            <Bot size={48} className="mx-auto mb-4 opacity-20" />
-            <p className="text-lg mb-2">Start a conversation</p>
-            <p className="text-sm">Ask me anything about {title.toLowerCase()}.</p>
+          <div className="max-w-3xl mx-auto mt-10">
+            <div className="bg-gray-900/40 border border-gray-800 rounded-xl p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center shrink-0">
+                  <Bot size={18} className="text-gray-300" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-white font-semibold text-lg">
+                    {introTitle || `How can I help with ${title}?`}
+                  </p>
+                  <p className="text-sm text-gray-400 mt-1">
+                    {introDescription || description}
+                  </p>
+                </div>
+              </div>
+
+              {samplePrompts && samplePrompts.length > 0 && (
+                <div className="mt-5">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Try one of these
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {samplePrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => {
+                          setInput(prompt);
+                          inputRef.current?.focus();
+                        }}
+                        className="px-3 py-2 rounded-lg bg-gray-800/50 border border-gray-700 text-gray-200 text-sm hover:bg-gray-800 hover:border-gray-600 transition-colors"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -324,8 +379,15 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
 
       {/* Input Area - Fixed to bottom */}
       <form onSubmit={handleSubmit} className="p-6 bg-gray-900 border-t border-gray-800 flex-shrink-0">
-        <div className="relative w-full">
+        <div className="flex items-center gap-3">
+          {composerLeftSlot && (
+            <div className="shrink-0">
+              {composerLeftSlot}
+            </div>
+          )}
+          <div className="relative w-full">
           <input
+            ref={inputRef}
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -346,6 +408,7 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           </button>
+          </div>
         </div>
       </form>
     </div>

@@ -1,9 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import DashboardLayout from './components/Layout/DashboardLayout';
 import DashboardHome from './pages/DashboardHome';
-import FintechAssistantPage from './pages/FintechAssistantPage';
-import CodeAssistantPage from './pages/CodeAssistantPage';
-import GeneralAssistantPage from './pages/GeneralAssistantPage';
+import AssistantsPage from './pages/Assistants';
 import SalesAgent from './pages/SalesAgent';
 import SalesOverview from './pages/SalesOverview';
 import SupportAgent from './pages/SupportAgent';
@@ -12,6 +10,7 @@ import MarketResearchAgent from './pages/MarketResearchAgent';
 import SiteScanAgent from './pages/SiteScanAgent';
 import MarketingOverview from './pages/MarketingOverview';
 import BlogAgent from './pages/BlogAgent';
+import BlogEditor from './pages/BlogEditor';
 import IntelligenceAgent from './pages/IntelligenceAgent';
 import LegalAgent from './pages/LegalAgent';
 import FinanceAgent from './pages/FinanceAgent';
@@ -26,9 +25,8 @@ function App() {
     <Routes>
       <Route path="/" element={<DashboardLayout />}>
         <Route index element={<DashboardHome />} />
-        <Route path="assistants/fintech" element={<FintechAssistantPage />} />
-        <Route path="assistants/code" element={<CodeAssistantPage />} />
-        <Route path="assistants/general" element={<GeneralAssistantPage />} />
+        <Route path="assistants" element={<Navigate to="/assistants/general" replace />} />
+        <Route path="assistants/:assistantType" element={<AssistantsPage />} />
         {/* Sales Domain */}
         <Route path="sales/overview" element={<SalesOverview />} />
         <Route path="sales" element={<SalesAgent />} />
@@ -37,6 +35,7 @@ function App() {
         <Route path="marketing/overview" element={<MarketingOverview />} />
         <Route path="marketing" element={<Navigate to="/marketing/overview" replace />} />
         <Route path="blog" element={<BlogAgent />} />
+        <Route path="blog/:id" element={<BlogEditor />} />
         <Route path="market-research" element={<MarketResearchAgent />} />
         
         {/* Operations Domain */}

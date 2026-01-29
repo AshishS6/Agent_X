@@ -57,7 +57,6 @@ const OperationsOverview = () => {
         <div className="space-y-6">
             {/* Header */}
             <div>
-                <h1 className="text-2xl font-bold text-white mb-2">Operations</h1>
                 <p className="text-gray-400 text-sm max-w-2xl">
                     Operational intelligence and compliance. Analyze websites for compliance, risk, and structural insights to inform operational decisions.
                 </p>

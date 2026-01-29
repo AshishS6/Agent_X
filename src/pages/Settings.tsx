@@ -31,7 +31,6 @@ const Settings = () => {
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div>
-                    <h1 className="text-2xl font-bold text-white mb-1">Settings</h1>
                     <p className="text-gray-400 text-sm">Manage your organization, users, and preferences</p>
                 </div>
                 <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium shadow-lg shadow-blue-500/20">

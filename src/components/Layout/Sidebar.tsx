@@ -30,6 +30,7 @@ interface NavItem {
     path: string;
     label: string;
     icon: React.ElementType;
+    end?: boolean; // exact match only when true
 }
 
 interface NavSection {
@@ -59,10 +60,13 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
         });
     };
 
-    // Check if any item in a section is active
-    const isSectionActive = (items: NavItem[]) => {
-        return items.some(item => location.pathname === item.path || location.pathname.startsWith(item.path + '/'));
+    const isItemActive = (item: NavItem) => {
+        if (item.end) return location.pathname === item.path;
+        return location.pathname === item.path || location.pathname.startsWith(item.path + '/');
     };
+
+    // Check if any item in a section is active
+    const isSectionActive = (items: NavItem[]) => items.some(isItemActive);
 
     const navSections: NavSection[] = [
         {
@@ -74,17 +78,15 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
         {
             title: 'Assistants',
             items: [
-                { path: '/assistants/fintech', label: 'Fintech Assistant', icon: DollarSign },
-                { path: '/assistants/code', label: 'Code Assistant', icon: Code },
-                { path: '/assistants/general', label: 'General Assistant', icon: Sparkles },
+                { path: '/assistants', label: 'Assistants', icon: MessageSquare },
             ]
         },
         {
             title: 'Sales',
             collapsible: true,
             items: [
-                { path: '/sales/overview', label: 'Overview', icon: LayoutDashboard },
-                { path: '/sales', label: 'Lead qualification & outreach', icon: Target },
+                { path: '/sales/overview', label: 'Overview', icon: LayoutDashboard, end: true },
+                { path: '/sales', label: 'Lead qualification & outreach', icon: Target, end: true },
             ]
         },
         {
@@ -194,6 +196,7 @@ const Sidebar = ({ isOpen, onClose }: SidebarProps) => {
                                             <NavLink
                                                 key={item.path}
                                                 to={item.path}
+                                                end={item.end}
                                                 onClick={() => {
                                                     if (window.innerWidth < 768) onClose();
                                                 }}

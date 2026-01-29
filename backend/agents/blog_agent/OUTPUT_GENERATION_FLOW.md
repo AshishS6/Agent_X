@@ -1,188 +1,179 @@
-# Blog Agent Output Generation Flow
+# Blog Agent Output Generation Flow (OPEN + Zwitch House Style)
 
 ## Overview
-The Blog Agent uses **LLM (Large Language Model)** to generate blog outlines and drafts. Based on your logs, it's currently using **Ollama with deepseek-r1:7b model**.
+The Blog Agent generates:
+- **Outlines**: JSON outline structure (H1/H2/H3 + intent)
+- **Drafts**: JSON payload containing a full markdown blog post + metadata
 
-## Complete Flow Diagram
+This flow is implemented as a **Go API → async task → Python CLI → BlogAgent** pipeline, with **brand-specific house-style enforcement** for **OPEN** and **Zwitch**.
+
+Key upgrades vs. the older implementation:
+- **Per-brand style spec** embedded verbatim into prompts (`style_spec.py`)
+- **House-style outline archetypes** (OPEN vs Zwitch) while keeping the same outline JSON schema
+- **Draft prompt enforcement** for required section patterns (Zwitch: Challenges/With Zwitch/Outcome + FAQs; OPEN: pain points + step-by-step + How OPEN helps)
+- **Post-generation enforcement** (heading/brand normalization + heuristic “style lint” + one editor rewrite pass)
+- **Longer timeouts** for local LLM + RAG runs (Go handler + server config)
+
+## Primary API paths (Blog Documents v2)
+The blog editor flow uses the Blog Documents API:
+- **Generate outline**: `POST /api/blog/documents/:id/outlines` → async task `generate_outline_v2`
+- **Approve outline**: `PUT /api/blog/documents/:id/outlines/:versionId` (set `status=approved`)
+- **Generate draft**: `POST /api/blog/documents/:id/drafts` → async task `generate_draft_v2`
+- **Fetch latest**: `GET /api/blog/documents/:id` (returns `document`, latest `outline`, latest `draft`)
+
+## End-to-end flow diagram (v2)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. Frontend Request (BlogAgent.tsx)                            │
-│    - User fills form: topic, brand, audience, intent            │
-│    - POST /api/agents/blog/execute                              │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 2. Go Backend Handler (agents.go)                               │
-│    - Creates task in database                                   │
-│    - Spawns async goroutine                                     │
-│    - Calls Python CLI via executor                             │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 3. Python CLI (cli.py)                                          │
-│    - Parses JSON input                                          │
-│    - Reads LLM_PROVIDER from env (ollama/openai/anthropic)      │
-│    - Creates BlogAgent instance                                 │
-│    - Calls agent.execute_task()                                  │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 4. BlogAgent (main.py)                                          │
-│    - Inherits from BaseAgent                                    │
-│    - Routes to specific method based on action:                 │
-│      • generate_outline → _generate_outline()                   │
-│      • generate_post_from_outline → _generate_post_from_outline()│
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 5. Prompt Construction                                          │
-│    For generate_outline:                                        │
-│    - Builds detailed prompt with:                                │
-│      • Brand guidance (OPEN/Zwitch)                              │
-│      • Audience guidance (SME/Developer/Founder/Enterprise)      │
-│      • Intent guidance (education/product/announcement)          │
-│      • Topic from user input                                    │
-│    - Includes JSON structure template                           │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 6. LLM Invocation (BaseAgent._create_llm)                       │
-│    - Creates LLM instance based on provider:                     │
-│      • OpenAI: ChatOpenAI (gpt-4-turbo-preview)                 │
-│      • Anthropic: ChatAnthropic (claude-3-sonnet)                │
-│      • Ollama: ChatOllama (deepseek-r1:7b) ← CURRENT           │
-│    - Sends SystemMessage + HumanMessage                         │
-│    - System prompt: Blog agent instructions                      │
-│    - User prompt: Generated prompt with specs                   │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 7. LLM Response Processing                                      │
-│    - Receives LLM response (JSON string)                        │
-│    - Extracts JSON from markdown code blocks if present          │
-│    - Parses JSON to Python dict                                  │
-│    - Validates structure (title, outline, etc.)                 │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 8. Output Formatting                                            │
-│    - Wraps in standardized format:                               │
-│      {                                                           │
-│        "action": "generate_outline",                            │
-│        "response": {                                            │
-│          "title": "...",                                        │
-│          "outline": [...],                                      │
-│          "brand": "OPEN",                                       │
-│          "topic": "AI in marketing",                            │
-│          "target_audience": "SME",                              │
-│          "intent": "education"                                 │
-│        }                                                        │
-│      }                                                           │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 9. Return to CLI                                                │
-│    - CLI formats as TaskResult                                  │
-│    - Outputs JSON to stdout                                      │
-│    - Go backend captures stdout                                 │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 10. Database Storage                                            │
-│     - Go backend parses JSON output                             │
-│     - Updates task in database:                                 │
-│       • status = "completed"                                    │
-│       • output = JSON from LLM                                  │
-│       • completed_at = NOW()                                     │
-└──────────────────────┬──────────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 11. Frontend Display                                            │
-│     - Frontend polls /api/tasks every 5 seconds                 │
-│     - Conversations tab displays output                          │
-│     - Renders outline structure with title, sections, intents    │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ 1) Frontend (Blog Editor / Blog Agent UI)                         │
+│    - Create/select a Blog Document                                │
+│    - POST /api/blog/documents/:id/outlines                         │
+│    - Later: approve outline, then POST /drafts                    │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 2) Go backend: BlogDocumentsHandler (blog_documents.go)           │
+│    - Validates document + approved outline (for draft)            │
+│    - Creates Task rows (action: generate_outline_v2 / draft_v2)   │
+│    - Spawns goroutine to execute tool via Executor                │
+│    - Uses longer per-call timeouts                                │
+│      • Outline: 20 minutes                                        │
+│      • Draft:   25 minutes                                        │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 3) Executor → Python CLI (backend/agents/blog_agent/cli.py)       │
+│    - Reads JSON input (action + payload)                          │
+│    - Creates a TaskInput and calls BlogAgent.execute_task()       │
+│    - LLM provider selection starts from env LLM_PROVIDER          │
+│      (router may still choose a local model when available)       │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 4) BlogAgent (backend/agents/blog_agent/main.py)                  │
+│    - Routes by action:                                            │
+│      • generate_outline_v2 → _generate_outline_v2()               │
+│      • generate_draft_v2   → _generate_draft_v2()                 │
+│    - Uses shared RAG pipeline when use_rag=true                   │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 5) Prompt construction + style injection                          │
+│    - Loads brand Style Spec (OPEN / Zwitch)                       │
+│    - Adds house-style outline archetype (OPEN vs Zwitch)          │
+│    - If RAG enabled: injects KB context (strict: no new facts)    │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 6) LLM invocation                                                  │
+│    - Sends SystemMessage(system prompt) + HumanMessage(prompt)     │
+│    - Provider/model chosen via environment + router availability   │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 7) Response parsing + repair                                       │
+│    - Extract JSON from ```json blocks or raw braces                │
+│    - Repairs common outline JSON issues (missing commas)           │
+│    - Draft parsing has extra robustness for control chars          │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 8) Post-generation enforcement (draft_v2 only)                     │
+│    - Normalize headings (H1/H2 Title Case; H3+ sentence case)      │
+│    - Normalize brand spelling (OPEN / Zwitch)                      │
+│    - Strip common LLM preambles before first heading               │
+│    - Heuristic style lint (required sections/patterns)             │
+│    - If lint fails: single editor rewrite pass                     │
+│    - Deterministic guardrails: ensure CTA/FAQs/With Zwitch (Zwitch)│
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 9) Storage (Postgres)                                              │
+│    - Outline: blog_outline_versions (status='draft')               │
+│    - Draft:   blog_draft_versions (status='draft')                 │
+└───────────────────────────┬──────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ 10) UI fetch + render                                               │
+│     - GET /api/blog/documents/:id returns latest outline + draft    │
+│     - UI renders markdown and version history                       │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Components
+## House-style encoding (OPEN vs Zwitch)
 
-### 1. LLM Provider Selection
-- **Environment Variable**: `LLM_PROVIDER` (ollama/openai/anthropic)
-- **Current Setting**: `ollama` (from your logs)
-- **Model**: `deepseek-r1:7b` (default for Ollama)
+### Style specs (`backend/agents/blog_agent/style_spec.py`)
+The Blog Agent embeds a **plain-text “Brand Style Spec”** into prompts. It encodes:
+- **Voice**: trustworthy, friendly, empathetic, politely confident, lightly witty
+- **Clarity**: short sentences, short paragraphs, avoid jargon
+- **Formatting rules**:
+  - American English
+  - Brand capitalization: **OPEN** and **Zwitch**
+  - H1/H2 Title Case; H3+ sentence case
+  - Numbers: words for 0–9, numerals for 10+
+  - Acronyms spelled out on first mention
+- **No-hallucination rule**: product claims/metrics/partners only if present in provided context
 
-### 2. System Prompt
-The agent uses a comprehensive system prompt that instructs the LLM to:
-- Generate structured, actionable blog outlines
-- Maintain brand voice consistency
-- Target specific audiences effectively
-- Follow content intent (education/product/announcement)
+### Outline archetypes (prompt scaffolds)
+In `_generate_outline()` the prompt adds a brand-specific archetype:
+- **OPEN**: practical SME/MSME pain framing → definition → pain points → step-by-step → How OPEN helps → conclusion
+- **Zwitch**: problem-first → Enter Zwitch → pillar sections with “Challenges/With Zwitch/Outcome” → why Zwitch stands out → real-world impact → conclusion → **CTA** → **FAQs**
 
-### 3. User Prompt Construction
-For `generate_outline`, the prompt includes:
-- Brand guidance (technical vs friendly)
-- Audience guidance (SME/Developer/Founder/Enterprise)
-- Intent guidance (education/product/announcement)
-- Topic from user input
-- JSON structure template
+## Draft post-processing + enforcement (what changed)
+Draft generation (`generate_draft_v2`) includes an enforcement pipeline **after** JSON parsing:
 
-### 4. LLM Response Format
-The LLM is instructed to return JSON:
-```json
-{
-  "title": "Blog Title Here",
-  "outline": [
-    {
-      "heading": "Section Title (H2)",
-      "intent": "What this section covers",
-      "subsections": [
-        {
-          "heading": "Subsection Title (H3)",
-          "intent": "What this subsection covers"
-        }
-      ]
-    }
-  ]
-}
-```
+1) **Normalize markdown**
+- Title-case H1/H2; sentence-case H3+
+- Fix brand spellings (OPEN, Zwitch)
+- Remove common LLM preambles before first heading
 
-### 5. Response Parsing
-- Extracts JSON from markdown code blocks if present
-- Falls back to regex extraction if needed
-- Validates JSON structure
-- Raises error if parsing fails
+2) **Heuristic style lint**
+- Requires `## Conclusion`
+- For Zwitch drafts: requires `## CTA`, `## FAQs`, and body labels:
+  - `Challenges Solved:`
+  - `Outcome:`
+  - `With Zwitch …`
 
-## Current Configuration
+3) **Single editor rewrite pass (only if lint fails)**
+`_editor_rewrite_markdown()` asks the model to rewrite the markdown to fix issues:
+- Preserves coverage/order
+- Does not invent facts
+- Does not add links unless already present
 
-Based on your logs:
-- **LLM Provider**: Ollama
-- **Model**: deepseek-r1:7b
-- **Temperature**: 0.7 (default)
-- **Max Tokens**: 4000 (for blog generation)
+4) **Deterministic guardrails**
+If the model still omits required Zwitch sections, `_ensure_house_style_sections()` appends or injects:
+- `## CTA`
+- `## FAQs` (basic FAQs)
+- A “With Zwitch, you can:” bullet block (inserted under “Challenges Solved:” when possible)
 
-## Verification
+## Timeouts (important operational detail)
+Long-form generation on local models + RAG frequently exceeds 5 minutes.
 
-The output IS being generated by the LLM as designed:
-1. ✅ LLM is invoked (line 160 in main.py: `response = self.llm.invoke(messages)`)
-2. ✅ Response is parsed from JSON (lines 175-180)
-3. ✅ Output is structured correctly (lines 182-192)
-4. ✅ Task completed successfully (your logs show "completed" status)
+Current defaults:
+- **Go server config**: `BLOG_AGENT_TIMEOUT` default is **25 minutes** (`backend/internal/config/config.go`)
+- **Go handler** (`backend/internal/handlers/blog_documents.go`):
+  - Outline execution context: **20 minutes**
+  - Draft execution context: **25 minutes**
 
-## Code References
+## Files involved (current)
+- **Agent logic**: `backend/agents/blog_agent/main.py`
+  - `get_style_spec()` integration
+  - Outline archetypes + prompt updates
+  - Draft post-processing pipeline (normalize/lint/rewrite/guardrails)
+- **Style specs**: `backend/agents/blog_agent/style_spec.py`
+- **CLI**: `backend/agents/blog_agent/cli.py`
+- **Go handlers**: `backend/internal/handlers/blog_documents.go`
+- **Timeout config**: `backend/internal/config/config.go`
 
-- **LLM Initialization**: `backend/agents/shared/base_agent.py:84-112`
-- **Blog Agent Logic**: `backend/agents/blog_agent/main.py:75-192`
-- **Prompt Construction**: `backend/agents/blog_agent/main.py:120-151`
-- **LLM Invocation**: `backend/agents/blog_agent/main.py:154-160`
-- **Response Parsing**: `backend/agents/blog_agent/main.py:162-180`
+## Notes / guardrails
+- **Links in CTA**: the editor pass is instructed not to add links unless already present in the text/context.
+- **No hallucinations**: the style spec and RAG prompt both emphasize “only use facts present in context.”

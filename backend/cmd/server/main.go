@@ -75,6 +75,7 @@ func main() {
 	toolsHandler := handlers.NewToolsHandler()
 	mccHandler := handlers.NewMccHandler()
 	assistantsHandler := handlers.NewAssistantsHandler(projectRoot)
+	blogDocumentsHandler := handlers.NewBlogDocumentsHandler(executor)
 
 	// Initialize MCC Tables & Seed Data
 	if err := models.InitMccTables(); err != nil {
@@ -100,6 +101,7 @@ func main() {
 				"monitoring": "/api/monitoring",
 				"health":     "/api/monitoring/health",
 				"mccs":       "/api/mccs",
+				"blog":       "/api/blog/documents",
 			},
 		})
 	})
@@ -154,6 +156,23 @@ func main() {
 		{
 			assistants.POST("/:name/chat", assistantsHandler.Chat)
 		}
+
+		// Blog Documents routes (v2)
+		blog := api.Group("/blog")
+		{
+			documents := blog.Group("/documents")
+			{
+			documents.POST("", blogDocumentsHandler.Create)
+			documents.GET("", blogDocumentsHandler.List)
+			documents.GET("/:id", blogDocumentsHandler.GetByID)
+			documents.POST("/:id/outlines", blogDocumentsHandler.GenerateOutline)
+			documents.PUT("/:id/outlines/:versionId", blogDocumentsHandler.UpdateOutlineStatus)
+			documents.PUT("/:id/outlines/:versionId/structure", blogDocumentsHandler.UpdateOutlineStructure)
+			documents.POST("/:id/outlines/:versionId/feedback", blogDocumentsHandler.AddFeedback)
+			documents.POST("/:id/drafts", blogDocumentsHandler.GenerateDraft)
+			documents.POST("/:id/drafts/:versionId/feedback", blogDocumentsHandler.AddFeedback)
+			}
+		}
 	}
 
 	// Graceful shutdown
@@ -180,6 +199,7 @@ func main() {
 	log.Printf("   - Tools:      http://localhost:%s/api/tools", cfg.Port)
 	log.Printf("   - MCCs:       http://localhost:%s/api/mccs", cfg.Port)
 	log.Printf("   - Assistants: http://localhost:%s/api/assistants/:name/chat", cfg.Port)
+	log.Printf("   - Blog Docs:  http://localhost:%s/api/blog/documents", cfg.Port)
 	log.Println("")
 
 	if err := router.Run(addr); err != nil {

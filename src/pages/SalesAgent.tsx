@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { DollarSign, Users, Filter, Search, Play, Loader2, FileText, CheckCircle, Mail, MessageSquare } from 'lucide-react';
+import { DollarSign, Users, Filter, Search, Play, Loader2, FileText } from 'lucide-react';
 import AgentLayout from '../components/Layout/AgentLayout';
 import { AgentService, TaskService, Task, AgentMetrics } from '../services/api';
 import { formatNumber, formatPercentage } from '../utils/formatting';
@@ -84,69 +84,8 @@ const SalesAgent = () => {
     }, [tasks]);
 
     const overviewContent = useMemo(() => {
-        const tasks = [
-            {
-                id: 'qualify',
-                title: 'Lead Qualification',
-                description: 'Score and qualify leads based on company data',
-                icon: CheckCircle,
-                color: 'bg-green-500',
-                action: 'qualify_lead',
-                available: true
-            },
-            {
-                id: 'outreach',
-                title: 'Outreach Email',
-                description: 'Generate personalized outreach emails',
-                icon: Mail,
-                color: 'bg-blue-500',
-                action: 'generate_email',
-                available: true
-            },
-            {
-                id: 'followup',
-                title: 'Follow-up Generation',
-                description: 'Create follow-up emails based on previous interactions',
-                icon: MessageSquare,
-                color: 'bg-purple-500',
-                action: 'generate_followup',
-                available: false,
-                comingSoon: true
-            }
-        ];
-
         return (
         <div className="space-y-6">
-            {/* What do you want to do? */}
-            <div>
-                <h2 className="text-lg font-semibold text-white mb-4">What do you want to do?</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {tasks.map((task) => (
-                        <div
-                            key={task.id}
-                            className={`bg-gray-900 p-4 rounded-xl border border-gray-800 transition-all ${
-                                task.available 
-                                    ? 'hover:border-gray-700 cursor-pointer' 
-                                    : 'opacity-60 cursor-not-allowed'
-                            }`}
-                        >
-                            <div className="flex items-start justify-between mb-3">
-                                <div className={`p-2 rounded-lg ${task.color} bg-opacity-10`}>
-                                    <task.icon className={`w-5 h-5 ${task.color.replace('bg-', 'text-')}`} />
-                                </div>
-                                {task.comingSoon && (
-                                    <span className="text-xs px-2 py-1 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/20">
-                                        Coming soon
-                                    </span>
-                                )}
-                            </div>
-                            <h3 className="text-base font-bold text-white mb-1">{task.title}</h3>
-                            <p className="text-xs text-gray-400">{task.description}</p>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
             {/* KPI Strip */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {[

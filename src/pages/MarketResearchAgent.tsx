@@ -136,11 +136,10 @@ const MarketResearchAgent = () => {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-3xl font-bold text-white mb-2">Market Research Agent</h1>
-                    <p className="text-gray-400">Competitor analysis, trend tracking, and market insights.</p>
-                </div>
+            <div className="flex justify-between items-start gap-4">
+                <p className="text-gray-400 text-sm max-w-2xl">
+                    Competitor analysis, trend tracking, and market insights.
+                </p>
                 <button
                     onClick={() => setIsModalOpen(true)}
                     className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
