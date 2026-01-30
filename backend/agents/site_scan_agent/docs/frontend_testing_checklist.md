@@ -36,7 +36,7 @@ export MARKET_SCAN_ENGINE=dual
 
 # Start worker_v2.py
 cd /Users/ashish/Agent_X
-python3 agents/market_research_agent/worker_v2.py
+python3 agents/site_scan_agent/worker_v2.py
 ```
 
 ### Verify Startup
@@ -244,7 +244,7 @@ Frontend testing is **COMPLETE** when:
 # Ctrl+C in terminal
 
 # Restart original worker
-python3 agents/market_research_agent/worker.py
+python3 agents/site_scan_agent/worker.py
 ```
 
 **Recovery time**: < 30 seconds

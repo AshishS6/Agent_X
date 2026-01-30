@@ -18,14 +18,16 @@ import (
 // TasksHandler handles task-related HTTP requests
 type TasksHandler struct {
 	taskRepo *models.TaskRepository
+	agentRepo *models.AgentRepository
 	executor *tools.Executor
 }
 
 // NewTasksHandler creates a new tasks handler
 func NewTasksHandler(executor *tools.Executor) *TasksHandler {
 	return &TasksHandler{
-		taskRepo: models.NewTaskRepository(),
-		executor: executor,
+		taskRepo:  models.NewTaskRepository(),
+		agentRepo: models.NewAgentRepository(),
+		executor:  executor,
 	}
 }
 
@@ -200,12 +202,29 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		finalScanData = scanData
 	}
 	
-	// Get market research tool
-	tool, exists := tools.GetToolByAgentType("market_research")
+	agent, err := h.agentRepo.FindByID(task.AgentID)
+	if err != nil {
+		log.Printf("[TasksHandler] Error fetching agent for task %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"error":   "Failed to resolve agent for report generation",
+		})
+		return
+	}
+	if agent == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"success": false,
+			"error":   "Agent not found for task",
+		})
+		return
+	}
+
+	// Get tool based on agent type
+	tool, exists := tools.GetToolByAgentType(agent.Type)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"error":   "Market research tool not found",
+			"error":   "Tool not configured for agent type: " + agent.Type,
 		})
 		return
 	}

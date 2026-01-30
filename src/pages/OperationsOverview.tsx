@@ -12,15 +12,30 @@ const OperationsOverview = () => {
     const fetchData = useCallback(async () => {
         try {
             const agents = await AgentService.getAll();
-            const agent = agents.find(a => a.type === 'market_research');
+            const siteScanAgent = agents.find(a => a.type === 'site_scan');
+            const marketResearchAgent = agents.find(a => a.type === 'market_research');
             
-            if (agent) {
-                const tasksData = await TaskService.getAll({ agentId: agent.id, limit: 10, offset: 0 });
+            if (siteScanAgent || marketResearchAgent) {
+                const taskRequests: Array<Promise<{ tasks: Task[]; total: number }>> = [];
+                if (siteScanAgent) {
+                    taskRequests.push(TaskService.getAll({ agentId: siteScanAgent.id, limit: 10, offset: 0 }));
+                }
+                if (marketResearchAgent) {
+                    taskRequests.push(TaskService.getAll({ agentId: marketResearchAgent.id, limit: 10, offset: 0 }));
+                }
+
+                const taskResults = await Promise.all(taskRequests);
+                const combinedTasks = taskResults.flatMap(result => result.tasks);
+                const uniqueTasks = Array.from(new Map(combinedTasks.map(task => [task.id, task])).values());
                 
                 // Filter for site scan tasks only
-                const scanTasks = tasksData.tasks.filter(task => 
-                    task.action === 'site_scan' || task.action === 'comprehensive_site_scan'
+                const scanTasks = uniqueTasks.filter(task => 
+                    task.action === 'site_scan' ||
+                    task.action === 'comprehensive_site_scan' ||
+                    task.action === 'kyc_site_scan'
                 );
+
+                scanTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
                 setRecentScans(scanTasks.slice(0, 5));
             }
         } catch (err) {
@@ -116,7 +131,11 @@ const OperationsOverview = () => {
                                         }`} />
                                         <div>
                                             <p className="text-sm font-medium text-white">
-                                                {task.action === 'comprehensive_site_scan' ? 'Comprehensive Site Scan' : 'Site Scan'}
+                                                {task.action === 'comprehensive_site_scan'
+                                                    ? 'Comprehensive Site Scan'
+                                                    : task.action === 'kyc_site_scan'
+                                                        ? 'KYC Site Scan'
+                                                        : 'Site Scan'}
                                             </p>
                                             <p className="text-xs text-gray-500">
                                                 {new Date(task.createdAt).toLocaleString()}

@@ -18,7 +18,7 @@ This folder provides a **lightweight, deterministic validation harness** for Sit
    - `pip install playwright`
    - `playwright install`
 3. Run:
-   - `python backend/agents/market_research_agent/validation/validate_goldset.py`
+   - `python backend/agents/site_scan_agent/validation/validate_goldset.py`
 
 ### Notes / Caveats
 - This harness is intentionally simple and does not require DB access.

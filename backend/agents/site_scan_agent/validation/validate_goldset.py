@@ -59,7 +59,7 @@ def main():
         sys.path.insert(0, str(repo_root))
 
     # Local import to avoid forcing scan deps when just reading files
-    from backend.agents.market_research_agent.scan_engine import ModularScanEngine  # type: ignore
+    from backend.agents.site_scan_agent.scan_engine import ModularScanEngine  # type: ignore
 
     here = Path(__file__).parent
     gold_path = here / "goldset.json"

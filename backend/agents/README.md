@@ -49,7 +49,11 @@ Agents are executed as CLI tools. You can run them manually for testing:
 ```bash
 # Market Research Agent
 cd backend/agents/market_research_agent
-python cli.py --input '{"action": "site_scan", "url": "https://example.com"}'
+python cli.py --input '{"action": "web_search", "query": "AI startups 2024"}'
+
+# Site Scan Agent
+cd backend/agents/site_scan_agent
+python cli.py --input '{"action": "comprehensive_site_scan", "url": "https://example.com"}'
 
 # Sales Agent
 cd backend/agents/sales_agent
@@ -64,14 +68,16 @@ backend/agents/
 │   ├── base_agent.py           # Base agent class with LLM integration
 │   ├── db_utils.py             # Database connection utilities
 │   └── tools/                  # Reusable tools (if any)
-├── market_research_agent/      # ✅ Fully functional
+├── site_scan_agent/            # ✅ Fully functional
 │   ├── cli.py                  # CLI entry point
-│   ├── main.py                 # LangChain ReAct agent
 │   ├── scan_engine.py          # V2 Modular Scan Engine
 │   ├── scanners/               # Site scanning modules
 │   ├── analyzers/             # Content analysis modules
 │   ├── crawlers/              # Web crawling modules
 │   └── docs/                  # Agent-specific documentation
+├── market_research_agent/      # ✅ Fully functional
+│   ├── cli.py                 # CLI entry point
+│   └── main.py                # LangChain ReAct agent
 ├── sales_agent/                # ✅ Fully functional
 │   ├── cli.py                 # CLI entry point
 │   ├── main.py                # LangChain ReAct agent
@@ -199,8 +205,8 @@ OLLAMA_MODEL=llama3  # or mistral, qwen2.5, etc.
 You can test agents directly via CLI without the backend running, as long as `.env` is configured:
 
 ```bash
-cd backend/agents/market_research_agent
-python cli.py --input '{"action": "site_scan", "url": "https://example.com"}'
+cd backend/agents/site_scan_agent
+python cli.py --input '{"action": "comprehensive_site_scan", "url": "https://example.com"}'
 ```
 
 This is useful for:
@@ -210,12 +216,17 @@ This is useful for:
 
 ## Available Agents
 
+### ✅ Site Scan Agent
+- **Status**: Fully functional
+- **Location**: `backend/agents/site_scan_agent/`
+- **Actions**: `site_scan`, `comprehensive_site_scan`, `kyc_site_scan`
+- **Features**: V2 Modular Scan Engine, SEO analysis, tech stack detection, compliance monitoring
+- **Documentation**: See `backend/agents/site_scan_agent/docs/`
+
 ### ✅ Market Research Agent
 - **Status**: Fully functional
 - **Location**: `backend/agents/market_research_agent/`
-- **Actions**: `site_scan`, `comprehensive_site_scan`, general research queries
-- **Features**: V2 Modular Scan Engine, SEO analysis, tech stack detection, compliance monitoring
-- **Documentation**: See `backend/agents/market_research_agent/docs/`
+- **Actions**: general research queries (competitor analysis, trend tracking, web search)
 
 ### ✅ Sales Agent
 - **Status**: Fully functional

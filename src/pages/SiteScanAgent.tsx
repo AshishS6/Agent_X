@@ -131,34 +131,55 @@ const SiteScanAgent = () => {
         try {
             setLoading(true);
             const agents = await AgentService.getAll();
-            const marketAgent = agents.find(a => a.type === 'market_research');
+            const siteScanAgent = agents.find(a => a.type === 'site_scan');
+            const marketResearchAgent = agents.find(a => a.type === 'market_research');
 
-            if (marketAgent) {
-                setAgent(marketAgent);
-                // Fetch a larger batch to ensure we have enough for filtering and pagination
-                // In a production system, this filtering would ideally be done on the backend
-                const { tasks: allTasks, total } = await TaskService.getAll({
-                    agentId: marketAgent.id,
-                    limit: 500, // Fetch more to account for filtering
-                    offset: 0
-                });
-                
-                // Filter for site scan tasks only (including KYC)
-                const scanTasks = allTasks.filter(task => 
-                    task.action === 'site_scan' || task.action === 'comprehensive_site_scan' || task.action === 'kyc_site_scan'
-                );
-                
-                // Sort by creation date (newest first)
-                scanTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-                
-                // Apply pagination
-                const start = (page - 1) * limit;
-                const end = start + limit;
-                setTasks(scanTasks.slice(start, end));
-                setTotalTasks(scanTasks.length);
-            } else {
-                setError('Market Research Agent not found in the system.');
+            if (siteScanAgent) {
+                setAgent(siteScanAgent);
             }
+
+            if (!siteScanAgent && !marketResearchAgent) {
+                setError('Site Scan Agent not found in the system.');
+                return;
+            }
+
+            // Fetch a larger batch to ensure we have enough for filtering and pagination
+            // In a production system, this filtering would ideally be done on the backend
+            const taskRequests: Array<Promise<{ tasks: Task[]; total: number }>> = [];
+            if (siteScanAgent) {
+                taskRequests.push(TaskService.getAll({
+                    agentId: siteScanAgent.id,
+                    limit: 500,
+                    offset: 0
+                }));
+            }
+            if (marketResearchAgent) {
+                taskRequests.push(TaskService.getAll({
+                    agentId: marketResearchAgent.id,
+                    limit: 500,
+                    offset: 0
+                }));
+            }
+
+            const taskResults = await Promise.all(taskRequests);
+            const combinedTasks = taskResults.flatMap(result => result.tasks);
+            const uniqueTasks = Array.from(new Map(combinedTasks.map(task => [task.id, task])).values());
+
+            // Filter for site scan tasks only (including KYC)
+            const scanTasks = uniqueTasks.filter(task =>
+                task.action === 'site_scan' ||
+                task.action === 'comprehensive_site_scan' ||
+                task.action === 'kyc_site_scan'
+            );
+
+            // Sort by creation date (newest first)
+            scanTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+            // Apply pagination
+            const start = (page - 1) * limit;
+            const end = start + limit;
+            setTasks(scanTasks.slice(start, end));
+            setTotalTasks(scanTasks.length);
         } catch (err: any) {
             setError(err.message || 'Failed to load agent data');
         } finally {
@@ -194,9 +215,7 @@ const SiteScanAgent = () => {
                     website_url: url
                 };
                 
-                // For now, we'll use market_research agent with kyc_site_scan action
-                // TODO: Integrate with KYC agent when available
-                await AgentService.execute('market_research', 'kyc_site_scan', input);
+                await AgentService.execute('site_scan', 'kyc_site_scan', input);
             } else {
                 // Regular site scan
                 const input: any = {
@@ -209,7 +228,7 @@ const SiteScanAgent = () => {
                 }
 
                 // Use 'comprehensive_site_scan' backend action but display as 'site_scan'
-                await AgentService.execute('market_research', 'comprehensive_site_scan', input);
+                await AgentService.execute('site_scan', 'comprehensive_site_scan', input);
             }
 
             setIsModalOpen(false);

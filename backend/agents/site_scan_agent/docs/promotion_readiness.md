@@ -165,7 +165,7 @@ If worker won't start with V2:
 1. **Switch to V1-only worker**:
    ```bash
    # Use original worker.py
-   python3 agents/market_research_agent/worker.py
+   python3 agents/site_scan_agent/worker.py
    ```
 
 2. **Investigate offline**:

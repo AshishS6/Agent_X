@@ -1,21 +1,22 @@
 # AgentX Deep Analysis Report
 **Principal Engineer + Product Architect Analysis**
 
-**Date:** January 2025  
-**Scope:** Complete codebase analysis for Blog Agent feasibility assessment
+**Date:** January 2026  
+**Scope:** Updated codebase analysis + platform execution model
 
 ---
 
 ## 1. Executive Summary
 
-**AgentX is a multi-agent platform with a hybrid Go/Python architecture.** The platform currently has **ONE fully functional agent** (Market Research Agent's site scan functionality) and **ONE partially scaffolded agent** (Sales Agent). All other agents exist only as frontend UI mockups with no backend implementation.
+**AgentX is a multi-agent platform with a hybrid Go/Python architecture.** The platform currently has **THREE functional agents** (Site Scan, Market Research, Blog), **THREE functional assistants** (Fintech, General, Code), and **ONE partially scaffolded agent** (Sales). All other agents remain frontend UI-only with no backend implementation.
 
 ### Key Findings:
-- **Backend**: Go server (port 3001) orchestrates Python agents via CLI subprocess execution
-- **Functional Agents**: 1 (Market Research - site scan only)
+- **Backend**: Go server (port 3001) orchestrates Python agents and assistants via CLI subprocess execution
+- **Functional Agents**: 3 (Site Scan, Market Research, Blog)
+- **Functional Assistants**: 3 (Fintech, General, Code)
 - **Partial Agents**: 1 (Sales - LLM-based scaffold)
 - **UI-Only Agents**: 7 (Marketing, Finance, HR, Legal, Intelligence, LeadSourcing, Support)
-- **Architecture**: Task-based async execution with PostgreSQL persistence
+- **Architecture**: Task-based async execution with PostgreSQL persistence and in-process concurrency limits
 - **Agent Contract**: CLI-based with strict JSON input/output format
 
 ---
@@ -24,24 +25,22 @@
 
 ### ✅ Fully Functional Backend Agents
 
-#### 1. Market Research Agent (`backend/agents/market_research_agent/`)
+#### 1. Site Scan Agent (`backend/agents/site_scan_agent/`)
 **Status:** PRODUCTION-GRADE
 
 **Implementation:**
 - **CLI Entry**: `cli.py` - Handles `--input` JSON, outputs JSON to stdout
-- **Core Engine**: `ModularScanEngine` (V2.1.1) in `scan_engine.py`
+- **Core Engine**: `ModularScanEngine` (V2) in `scan_engine.py`
 - **Actions Supported**:
   - `site_scan` / `comprehensive_site_scan` → Uses ModularScanEngine
-  - `download_report` → Generates PDF/JSON/Markdown reports
-  - `web_search` → Uses V1 BaseAgent (DuckDuckGo search)
-  - `monitor_url` → Uses V1 BaseAgent (crawling with keywords)
+  - `kyc_site_scan` → Runs KYC decision engine
+  - `download_report` → Generates PDF/JSON/Markdown reports (PDF base64)
 
 **Architecture:**
 ```
-market_research_agent/
+site_scan_agent/
 ├── cli.py                    # CLI entry point (REQUIRED for Go integration)
-├── scan_engine.py            # V2 ModularScanEngine (1712 lines)
-├── main.py                   # V1 BaseAgent implementation (1300+ lines)
+├── scan_engine.py            # V2 ModularScanEngine
 ├── analyzers/                # 9 analyzer modules
 │   ├── content_analyzer.py
 │   ├── seo_analyzer.py
@@ -69,10 +68,10 @@ market_research_agent/
 ```
 
 **Execution Flow:**
-1. Frontend → `POST /api/agents/market_research/execute`
+1. Frontend → `POST /api/agents/site_scan/execute`
 2. Go Handler (`internal/handlers/agents.go:Execute`) → Creates task in DB
 3. Go Executor (`internal/tools/executor.go`) → Spawns Python subprocess
-4. Python CLI (`cli.py`) → Routes to `ModularScanEngine` or `BaseAgent`
+4. Python CLI (`cli.py`) → Routes to `ModularScanEngine` or KYC engine
 5. Output → JSON to stdout → Go captures → Updates task in DB
 6. Frontend polls `GET /api/tasks/:id` for results
 
@@ -90,19 +89,81 @@ market_research_agent/
 ```
 
 **Registration:**
-- Go Registry: `internal/tools/registry.go:26-36` (registered as `"market_research"`)
-- Database: `database/schema.sql:95` (agent record exists)
+- Go Registry: `internal/tools/registry.go` (registered as `"site_scan"`)
+- Database: `database/schema.sql` (agent record exists)
 
 **What Makes It Work:**
 - ✅ Complete CLI implementation following Agent Contract
-- ✅ Modular, production-ready scan engine (V2.1.1)
-- ✅ Comprehensive error handling and logging
+- ✅ Modular, production-ready scan engine (V2)
+- ✅ KYC decisioning integrated via `kyc_site_scan` action
 - ✅ Database integration (snapshots, cache)
-- ✅ Frontend integration (full UI in `MarketResearchAgent.tsx`)
+- ✅ Frontend integration (full UI in `SiteScanAgent.tsx`)
 
 ---
 
-#### 2. Sales Agent (`backend/agents/sales_agent/`)
+#### 2. Market Research Agent (`backend/agents/market_research_agent/`)
+**Status:** FUNCTIONAL (LLM-based research)
+
+**Implementation:**
+- **CLI Entry**: `cli.py` - Handles `--input` JSON, outputs JSON to stdout
+- **Core Logic**: `main.py` - `BaseAgent` with research tools (DuckDuckGo, lightweight crawler)
+- **Actions Supported**:
+  - `market_analysis`, `competitor_research`, `trend_monitoring`
+  - `web_search`, `monitor_url` (lightweight crawl)
+  - `download_report` → Simple JSON/Markdown export (no PDF)
+
+**Architecture:**
+```
+market_research_agent/
+├── cli.py     # CLI entry point
+└── main.py    # BaseAgent implementation (research tools)
+```
+
+**Execution Flow:**
+1. Frontend → `POST /api/agents/market_research/execute`
+2. Go Handler → Creates task in DB
+3. Go Executor → Spawns Python subprocess
+4. Python CLI → Routes to BaseAgent
+5. Output → JSON to stdout → Task updated in DB
+
+**What Works:**
+- ✅ CLI follows Agent Contract
+- ✅ Registered in Go registry and database
+- ✅ Frontend integration (`MarketResearchAgent.tsx`)
+- ✅ LLM-based research workflows
+
+**What's Missing / Moved:**
+- ❌ Deep site scanning moved to `site_scan_agent`
+- ❌ PDF report export (market research uses simple JSON/Markdown export)
+
+---
+
+#### 3. Blog Agent (`backend/agents/blog_agent/`)
+**Status:** FUNCTIONAL (outline + draft generation)
+
+**Implementation:**
+- **CLI Entry**: `cli.py` - Handles `generate_outline` / `generate_post_from_outline` (plus v2 actions)
+- **Core Logic**: `main.py` - `BaseAgent` with brand style spec normalization
+- **APIs**: `/api/blog/documents/*` for versioned outlines/drafts
+
+**Architecture:**
+```
+blog_agent/
+├── cli.py
+├── main.py
+├── style_spec.py
+└── OUTPUT_GENERATION_FLOW.md
+```
+
+**What Works:**
+- ✅ CLI and registry integration (`internal/tools/registry.go`)
+- ✅ Database record exists
+- ✅ Blog documents API supports outline → feedback → draft workflow
+- ✅ Frontend integration (`BlogAgent.tsx`, `BlogEditor.tsx`)
+
+---
+
+#### 4. Sales Agent (`backend/agents/sales_agent/`)
 **Status:** PARTIAL / SCAFFOLDED
 
 **Implementation:**
@@ -124,7 +185,7 @@ sales_agent/
 
 **What Works:**
 - ✅ CLI follows Agent Contract
-- ✅ Registered in Go registry (`internal/tools/registry.go:37-46`)
+- ✅ Registered in Go registry (`internal/tools/registry.go`)
 - ✅ Database record exists
 - ✅ Frontend integration (`SalesAgent.tsx` can execute tasks)
 - ✅ Basic LLM integration via BaseAgent
@@ -179,20 +240,19 @@ The following agents exist **ONLY** as frontend pages with no backend support:
 
 ---
 
-### 🔍 Special Case: KYC Site Scan
+### 🔍 KYC Site Scan (Integrated)
 
-**Location:** `backend/agents/kyc_site_scan/`
+**Location:** `backend/agents/kyc_site_scan/` (engine) + `backend/agents/site_scan_agent/cli.py` (entry)
 
-**Status:** SEPARATE MODULE (Not integrated into main AgentX flow)
+**Status:** INTEGRATED (Accessible via standard AgentX flow)
 
 **Implementation:**
-- Wraps `ModularScanEngine` from `market_research_agent`
-- Adds KYC-specific decision logic (PASS/FAIL/ESCALATE)
-- Has its own API handlers (`api/rest_handler.py`, `api/webhook_handler.py`)
-- **NOT registered in Go tool registry**
-- **NOT accessible via `/api/agents/:name/execute`**
+- Site Scan agent exposes `kyc_site_scan` action
+- CLI imports `KYCDecisionEngine` and runs it inside standard task flow
+- Uses same task system and registry as other agents
+- Accessible via `POST /api/agents/site_scan/execute`
 
-**Assessment:** This is a specialized module that uses the scan engine but operates outside the standard AgentX agent pattern. It's a reference implementation for how to extend the scan engine for domain-specific use cases.
+**Assessment:** KYC scanning is now a first-class capability of the Site Scan agent, not a separate integration path.
 
 ---
 
@@ -325,7 +385,8 @@ ON CONFLICT (type) DO NOTHING;
 - **Task-Based**: Every execution creates a task record in PostgreSQL
 - **Subprocess Isolation**: Each agent runs in separate Python subprocess
 - **Timeout Enforcement**: Go enforces per-tool timeouts
-- **Concurrency Limits**: Global (10) + per-tool limits (configurable)
+- **Concurrency Limits**: Global + per-tool semaphores (defaults: 10 global, 5 per-tool via config)
+- **In-Process Queueing**: When limits are hit, goroutines block on semaphores (no durable queue)
 
 #### Shared Infrastructure
 
@@ -371,7 +432,9 @@ ON CONFLICT (type) DO NOTHING;
 
 | Frontend Page | Backend Agent | Status | Actions Supported |
 |--------------|---------------|--------|-------------------|
-| `MarketResearchAgent.tsx` | `market_research_agent` | ✅ FULL | `site_scan`, `comprehensive_site_scan`, `download_report`, `web_search` |
+| `MarketResearchAgent.tsx` | `market_research_agent` | ✅ FULL | `market_analysis`, `competitor_research`, `trend_monitoring`, `web_search`, `monitor_url`, `download_report` (json/markdown) |
+| `SiteScanAgent.tsx` | `site_scan_agent` | ✅ FULL | `site_scan`, `comprehensive_site_scan`, `kyc_site_scan`, `download_report` (pdf/json/markdown) |
+| `BlogAgent.tsx`, `BlogEditor.tsx` | `blog_agent` + blog documents API | ✅ FULL | `generate_outline`, `generate_post_from_outline`, `generate_outline_v2`, `generate_draft_v2` |
 | `SalesAgent.tsx` | `sales_agent` | ⚠️ PARTIAL | `generate_email`, `qualify_lead` |
 
 ### Frontend Routes WITHOUT Backend Support
@@ -386,12 +449,30 @@ ON CONFLICT (type) DO NOTHING;
 | `LeadSourcingAgent.tsx` | ❌ NONE | Pure UI mockup |
 | `SupportAgent.tsx` | ❌ NONE | Pure UI mockup |
 
+### Assistants (Chat) Execution
+- **Endpoint**: `POST /api/assistants/:name/chat`
+- **Runner**: `backend/assistants/runner.py` executed via `python3` subprocess
+- **Contract**: Strict JSON response with `assistant`, `answer`, `citations`, `metadata`
+- **Execution Model**: Request/response (not task-based), 5-minute timeout
+- **Available Assistants**:
+  - `fintech` (RAG-enabled; uses knowledge base `fintech`)
+  - `general` (no RAG)
+  - `code` (no RAG)
+- **RAG Stack**: ChromaDB vector store + Ollama embedding client (`backend/knowledge/*`, `backend/data/chromadb`)
+
 ### Backend Capabilities NOT Surfaced in UI
 
 **Market Research Agent:**
-- ✅ All capabilities are surfaced in UI
-- ✅ Report download (PDF/JSON/Markdown) is accessible
+- ✅ Core research actions are surfaced in UI
+- ⚠️ Report download is simple (JSON/Markdown only)
 - ✅ Task history and polling work correctly
+
+**Site Scan Agent:**
+- ✅ Full scan workflows are surfaced in UI
+- ✅ Report download (PDF/JSON/Markdown) is accessible
+
+**Blog Agent:**
+- ✅ Document workflow (outline → feedback → draft) is surfaced via Blog UI
 
 **Sales Agent:**
 - ✅ Task execution is accessible via UI
@@ -401,6 +482,8 @@ ON CONFLICT (type) DO NOTHING;
 ---
 
 ## 5. Blog Agent Feasibility Analysis
+
+**2026 Update:** Blog Agent is implemented under `backend/agents/blog_agent/`, registered in the Go registry, seeded in the database, and integrated with `BlogAgent.tsx` + `BlogEditor.tsx` using the `/api/blog/documents` workflow. The remainder of this section is preserved for historical context.
 
 ### Decision: ✅ GO (Conditional)
 
@@ -847,22 +930,50 @@ backend/agents/blog_agent/
 
 ---
 
-## 10. Conclusion
+## 10. Concurrency, Queueing, and Scaling (2026)
 
-**AgentX is ready for Blog Agent implementation with minimal platform changes.**
+### How Processes Run (Queue vs Parallel)
+- **Parallel by default**: Each request spawns a goroutine and a Python subprocess.
+- **Concurrency gates**: Global + per-tool semaphores throttle parallelism.
+- **In-memory waiting**: When limits are hit, goroutines block (no external queue).
+- **Task visibility**: Tasks are created immediately and marked `processing` before execution begins.
+
+### Concurrent Users Calling the Same Agent
+- Requests are accepted immediately and stored as tasks.
+- Execution is throttled per tool (default 5) and globally (default 10).
+- Excess requests wait in-process until a semaphore slot frees up.
+
+### CPU / Resource Scaling Characteristics
+- **LLM-based agents (Market Research, Blog, Sales)**: Mostly network-bound (LLM API calls), lower CPU.
+- **Site Scan + KYC**: CPU + network heavy (crawling, parsing, analysis), higher RAM usage per subprocess.
+- **Report generation**: PDF generation adds CPU/memory overhead during export.
+
+### Practical Server Sizing (Guidance)
+- **Baseline dev / low traffic**: 2-4 vCPU, 8-16 GB RAM, PostgreSQL on same box.
+- **Moderate traffic (site scans + blog)**: 4-8 vCPU, 16-32 GB RAM, separate DB.
+- **Local LLMs**: GPU required; size GPU based on model (not covered in this repo).
+- **Scale-out**: Run multiple Go backend instances; concurrency limits apply per instance.
+
+**Important:** These are starting points. Actual sizing depends on scan depth, average page size, LLM provider latency, and desired concurrency.
+
+---
+
+## 11. Conclusion
+
+**AgentX now includes Site Scan, Market Research, and Blog agents with a stable CLI execution model; next focus is scaling and operational hardening.**
 
 **Key Takeaways:**
 - ✅ Platform architecture supports new agents via established contract
 - ✅ Existing infrastructure (BaseAgent, executor, database) is reusable
 - ✅ No blocking refactors required
 - ⚠️ Content quality and SEO accuracy are unknowns (mitigate with testing)
-- ✅ Phase 1 MVP is achievable in 4 weeks
+- ✅ Phase 1 MVP implemented (Blog Agent + document workflow)
 
-**Recommendation:** **PROCEED with Phase 1 implementation** following the structure and patterns established by `sales_agent` and `market_research_agent`.
+**Recommendation:** Continue hardening and scaling (queueing, metrics, load testing) while expanding integrations.
 
 ---
 
-**Report Generated:** January 2025  
+**Report Generated:** January 2026  
 **Analysis Method:** Codebase deep-dive, pattern analysis, architecture review  
 **Files Analyzed:** 50+ files across backend, frontend, and database  
 **Confidence Level:** High (based on concrete code evidence)

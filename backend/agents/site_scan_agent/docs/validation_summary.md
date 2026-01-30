@@ -133,7 +133,7 @@ Validation used structured log tags for easy filtering:
 
 ```bash
 export MARKET_SCAN_ENGINE=dual
-python3 agents/market_research_agent/worker_v2.py
+python3 agents/site_scan_agent/worker_v2.py
 ```
 
 ### Timeline

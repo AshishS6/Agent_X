@@ -58,7 +58,10 @@ const MarketResearchAgent = () => {
                 });
                 // Filter out site scan tasks - they belong to Operations domain
                 const marketResearchTasks = agentTasks.filter(
-                    task => task.action !== 'site_scan' && task.action !== 'comprehensive_site_scan'
+                    task =>
+                        task.action !== 'site_scan' &&
+                        task.action !== 'comprehensive_site_scan' &&
+                        task.action !== 'kyc_site_scan'
                 );
                 setTasks(marketResearchTasks);
                 // Adjust total count (approximate, as we're filtering client-side)

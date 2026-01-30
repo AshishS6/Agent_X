@@ -98,14 +98,14 @@ class KYCDecisionEngine:
         """Lazy load the ModularScanEngine"""
         if self._scan_engine is None:
             try:
-                from market_research_agent.scan_engine import ModularScanEngine
+                from site_scan_agent.scan_engine import ModularScanEngine
                 self._scan_engine = ModularScanEngine(logger=self.logger)
             except ImportError:
                 # Try alternative import path
                 try:
                     sys.path.insert(0, os.path.join(
                         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        'market_research_agent'
+                        'site_scan_agent'
                     ))
                     from scan_engine import ModularScanEngine
                     self._scan_engine = ModularScanEngine(logger=self.logger)

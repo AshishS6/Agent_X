@@ -170,7 +170,7 @@ All logging, debug messages, and progress updates should go to `stderr`, not `st
 - Non-zero = failure
 
 ### Example Implementation
-See `backend/agents/market_research_agent/cli.py` or `backend/agents/sales_agent/cli.py` for reference implementations.
+See `backend/agents/site_scan_agent/cli.py` or `backend/agents/sales_agent/cli.py` for reference implementations.
 
 ## Environment Variables
 

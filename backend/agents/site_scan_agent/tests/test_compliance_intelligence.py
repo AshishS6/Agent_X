@@ -2,8 +2,8 @@
 Tests for Compliance Intelligence Module (Context Aware)
 """
 import pytest
-from backend.agents.market_research_agent.analyzers.compliance_intelligence import ComplianceIntelligence
-from backend.agents.market_research_agent.analyzers.context_classifier import BusinessContextClassifier
+from backend.agents.site_scan_agent.analyzers.compliance_intelligence import ComplianceIntelligence
+from backend.agents.site_scan_agent.analyzers.context_classifier import BusinessContextClassifier
 
 @pytest.fixture
 def engine():

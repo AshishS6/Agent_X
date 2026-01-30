@@ -20,5 +20,5 @@ pytest>=7.0.0
 pytest-asyncio>=0.21.0
 
 # Note: Other dependencies like requests, beautifulsoup4, etc.
-# are expected to be installed from the parent market_research_agent
+# are expected to be installed from the parent site_scan_agent
 

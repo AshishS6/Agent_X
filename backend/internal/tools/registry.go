@@ -26,13 +26,23 @@ func InitRegistry(marketResearchTimeout, salesAgentTimeout, blogAgentTimeout tim
 	Registry = map[string]ToolConfig{
 		"market_research": {
 			Name:             "Market Research Agent",
-			Description:      "Comprehensive site scan, competitor analysis, and compliance monitoring",
+			Description:      "Competitor analysis, trend tracking, and market research",
 			Command:          "python3",
 			Args:             []string{"backend/agents/market_research_agent/cli.py"},
 			Timeout:          marketResearchTimeout,
 			WorkingDir:       ".",
 			ConcurrencyLimit: 5,
 			AgentType:        "market_research",
+		},
+		"site_scan": {
+			Name:             "Site Scan Agent",
+			Description:      "Website scanning, compliance checks, and KYC site scans",
+			Command:          "python3",
+			Args:             []string{"backend/agents/site_scan_agent/cli.py"},
+			Timeout:          marketResearchTimeout,
+			WorkingDir:       ".",
+			ConcurrencyLimit: 5,
+			AgentType:        "site_scan",
 		},
 		"sales": {
 			Name:             "Sales Agent",
