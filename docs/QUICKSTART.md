@@ -98,10 +98,10 @@ curl http://localhost:3001/api/monitoring/metrics
 
 ## Step 6: Test Agent Execution
 
-### Market Research Agent - Site Scan
+### Site Scan Agent - Site Scan
 
 ```bash
-curl -X POST http://localhost:3001/api/agents/market_research/execute \
+curl -X POST http://localhost:3001/api/agents/site_scan/execute \
   -H "Content-Type: application/json" \
   -d '{
     "action": "comprehensive_site_scan",
@@ -132,13 +132,25 @@ curl -X POST http://localhost:3001/api/agents/sales/execute \
   }'
 ```
 
+### Assistants - Chat (Fintech)
+
+```bash
+curl -X POST http://localhost:3001/api/assistants/fintech/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "How do I integrate Zwitch payment gateway?",
+    "knowledge_base": "fintech",
+    "assistant": "fintech"
+  }'
+```
+
 ### Direct CLI Testing (No Backend)
 
 You can test agents directly without the backend running:
 
 ```bash
-# Market Research Agent
-cd backend/agents/market_research_agent
+# Site Scan Agent
+cd backend/agents/site_scan_agent
 python cli.py --input '{"action": "site_scan", "url": "https://example.com"}'
 
 # Sales Agent
@@ -166,7 +178,10 @@ Dashboard opens at http://localhost:5173
 
 **Active Pages:**
 - ✅ Dashboard Home - Real-time system metrics and overview
-- ✅ Market Research Agent - Site scan with V2 modular engine, SEO analysis, tech stack detection
+- ✅ Site Scan Agent - V2 modular engine, SEO analysis, tech stack detection, KYC scan
+- ✅ Market Research Agent - LLM-based research workflows
+- ✅ Blog Agent - Document workflow (outline → draft)
+- ✅ Assistants - Fintech, General, Code chat
 - ✅ Sales Agent - Email generation and lead qualification
 - ✅ Activity Logs - Live task execution history with pagination
 - 🔄 Support Agent - UI ready (implementation pending)
@@ -200,7 +215,7 @@ cd backend/agents
 pip install -r requirements.txt
 
 # Test CLI directly
-cd market_research_agent
+cd site_scan_agent
 python cli.py --input '{"action": "site_scan", "url": "https://google.com"}'
 ```
 
@@ -275,7 +290,7 @@ docker-compose up -d    # Restart (will re-run init)
 |--------|----------|-------------|
 | GET | `/api/agents` | List all agents |
 | GET | `/api/agents/:id` | Get agent by ID |
-| POST | `/api/agents/:name/execute` | Execute agent by type (e.g., `market_research`, `sales`) |
+| POST | `/api/agents/:name/execute` | Execute agent by type (e.g., `site_scan`, `market_research`, `sales`) |
 | PUT | `/api/agents/:id` | Update agent configuration |
 | GET | `/api/agents/:id/metrics` | Get agent metrics and statistics |
 | GET | `/api/tasks` | List tasks (supports `?agentId=`, `?status=`, `?limit=`, `?offset=`) |

@@ -95,6 +95,17 @@ The backend is now **production-ready** for frontend integration:
 ✅ Error handling  
 ✅ Validation  
 
+### Restart Backend (Required)
+
+Apply the changes by restarting the Go server:
+
+```bash
+# Stop current backend (Ctrl+C)
+# Then restart:
+cd backend
+go run cmd/server/main.go
+```
+
 You can now build the frontend with confidence that:
 - The API contract won't change unexpectedly
 - You have metrics to monitor usage

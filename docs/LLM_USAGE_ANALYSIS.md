@@ -1,5 +1,14 @@
 # Complete LLM Usage Analysis for AgentX
 
+## 2026 Update (Superseded Areas)
+
+This analysis predates the **LLM Router** refactor. Key differences today:
+- **All LLM calls go through `backend/llm/router`** (local-first with cloud fallback).
+- **Assistants no longer use Ollama-only clients**; they use the router and can fall back to cloud providers.
+- **Model selection** is driven by `LLM_LOCAL_MODEL` / `LLM_CLOUD_MODEL` and router registry.
+
+For the current implementation details, see `LLM_ROUTER_IMPLEMENTATION.md`.
+
 ## Executive Summary
 
 This document provides a comprehensive analysis of all LLM (Large Language Model) usage across the AgentX project, including configuration locations, usage patterns, and environment variables.

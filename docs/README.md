@@ -6,7 +6,7 @@ Transform your business workflows with autonomous AI agents powered by GPT-4, Cl
 
 Agent_X is a production-ready agentic AI platform featuring:
 
-- **9 Specialized AI Agents** for Sales, Support, HR, Legal, Finance, Marketing, Intelligence, Lead Sourcing, and Market Research
+- **Functional Agents + Assistants** for Site Scan, Market Research, Blog, Sales (partial), plus Fintech/General/Code chat assistants
 - **Multi-LLM Support** - OpenAI, Anthropic Claude, or Ollama (local/free)
 - **Go + Python Architecture** - High-performance Go backend (Gin framework) with Python AI agents
 - **CLI-Based Execution** - Agents run as CLI tools, spawned directly by the Go backend as subprocesses
@@ -55,16 +55,27 @@ See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
   - Tool system, memory, and logging
   - Standardized JSON input/output contract
   
-- ✅ **Market Research Agent** - Fully functional!
-  - Web search via DuckDuckGo (free)
-  - Advanced web crawler with robots.txt and sitemap support
+- ✅ **Site Scan Agent** - Production-grade
   - Comprehensive site scanning (V2 modular engine)
   - Content risk detection and business details extraction
   - SEO analysis and tech stack detection
   - Page caching for efficient re-scans
   - Change detection and compliance monitoring
+  - KYC site scan decisioning
   
-- ✅ **Sales Agent** - Fully functional!
+- ✅ **Market Research Agent** - LLM-based research
+  - Web search via DuckDuckGo (free)
+  - Competitor and trend analysis
+  - Lightweight crawl via `monitor_url`
+  
+- ✅ **Blog Agent** - Document workflow
+  - Outline and draft generation
+  - Brand style normalization
+  
+- ✅ **Assistants (Chat)** - Fintech, General, Code
+  - RAG-enabled fintech assistant via knowledge base
+  
+- ⚠️ **Sales Agent** - Partial scaffold
   - Email generation with context awareness
   - Lead qualification
   - Calendar integration support
@@ -85,7 +96,7 @@ See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
 
 - [ ] Remaining 7 agents implementation (Support, HR, Legal, Finance, Marketing, Intelligence, Lead Sourcing)
 - [ ] WebSocket for real-time updates
-- [ ] RAG with vector database
+- [ ] Expanded RAG coverage (more knowledge bases)
 - [ ] Workflow automation
 - [ ] Enhanced error recovery and retry mechanisms
 
@@ -125,17 +136,17 @@ This provides:
 ## 📚 Documentation
 
 - [Quick Start Guide](./QUICKSTART.md) - Get running in 5 minutes
-- [Architecture Guide](./docs/ARCHITECTURE.md) - Deep dive into system design and internals
-- [Go Backend README](./backend/README.md) - Backend API documentation and development guide
-- [Agents README](./backend/agents/README.md) - Agent development guide and CLI contract
-- [Market Research Agent Docs](./backend/agents/market_research_agent/docs/) - Site scan engine documentation
+- [Architecture Guide](./ARCHITECTURE.md) - Deep dive into system design and internals
+- [Go Backend README](../backend/README.md) - Backend API documentation and development guide
+- [Agents README](../backend/agents/README.md) - Agent development guide and CLI contract
+- [Site Scan Agent Docs](../backend/agents/site_scan_agent/docs/) - Site scan engine documentation
 
 ## 🎬 Demo
 
-**Market Research Agent - Site Scan (V2 Engine):**
+**Site Scan Agent - Site Scan (V2 Engine):**
 ```bash
 # Execute via API
-curl -X POST http://localhost:3001/api/agents/market_research/execute \
+curl -X POST http://localhost:3001/api/agents/site_scan/execute \
   -H "Content-Type: application/json" \
   -d '{
     "action": "comprehensive_site_scan",
@@ -146,7 +157,7 @@ curl -X POST http://localhost:3001/api/agents/market_research/execute \
 curl http://localhost:3001/api/tasks/{task-id}
 
 # Or run CLI directly (for testing)
-cd backend/agents/market_research_agent
+cd backend/agents/site_scan_agent
 python cli.py --input '{"action": "site_scan", "url": "https://example.com"}'
 ```
 
@@ -157,6 +168,17 @@ curl -X POST http://localhost:3001/api/agents/sales/execute \
   -d '{
     "action": "generate_email",
     "input": {"recipientName": "Jane Smith", "context": "Follow up after demo"}
+  }'
+```
+
+**Assistants - Chat (Fintech):**
+```bash
+curl -X POST http://localhost:3001/api/assistants/fintech/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "How do I integrate Zwitch payment gateway?",
+    "knowledge_base": "fintech",
+    "assistant": "fintech"
   }'
 ```
 
@@ -183,8 +205,11 @@ Go Backend, Database, Agent CLI Framework, Frontend Integration, Hybrid Concurre
 Modular scan engine, SEO analysis, tech stack detection, page caching, change detection
 
 **Phase 3: Multi-Agent System** 🚧 IN PROGRESS  
-- ✅ Market Research Agent (fully functional)
-- ✅ Sales Agent (fully functional)
+- ✅ Site Scan Agent (fully functional)
+- ✅ Market Research Agent (LLM-based research)
+- ✅ Blog Agent (document workflow)
+- ✅ Assistants (fintech, general, code)
+- ⚠️ Sales Agent (partial scaffold)
 - 🔄 Support Agent (UI ready, implementation pending)
 - 🔄 HR Agent (UI ready, implementation pending)
 - 🔄 Legal Agent (UI ready, implementation pending)
@@ -223,7 +248,7 @@ Security hardening, performance optimization, cloud deployment, WebSocket real-t
 
 4. Frontend page already exists at `src/pages/MyAgent.tsx` (update as needed)
 
-See [backend/agents/README.md](./backend/agents/README.md) for detailed agent development guide.
+See [backend/agents/README.md](../backend/agents/README.md) for detailed agent development guide.
 
 ## 📄 License
 
