@@ -23,7 +23,8 @@ import json
 import argparse
 import logging
 import asyncio
-from typing import Dict, Any
+import re
+from typing import Dict, Any, List, Optional, Tuple
 
 # Configure logging to stderr
 logging.basicConfig(
@@ -37,7 +38,11 @@ logger = logging.getLogger("Assistant.Runner")
 from assistants.fintech_assistant import FintechAssistant
 from assistants.code_assistant import CodeAssistant
 from assistants.general_assistant import GeneralAssistant
-from assistants.prompt_builder import build_fintech_prompt, build_generic_prompt
+from assistants.prompt_builder import (
+    build_fintech_prompt,
+    build_generic_prompt,
+    maybe_build_fintech_api_samples_answer,
+)
 
 # Import knowledge and LLM modules
 from knowledge.vector_store import ChromaDBStore, OllamaEmbeddingClient
@@ -51,6 +56,107 @@ ASSISTANTS = {
     "code": CodeAssistant,
     "general": GeneralAssistant,
 }
+
+
+def _classify_fintech_query(message: str) -> Dict[str, Any]:
+    """
+    Rule-based query classification for retrieval discipline.
+
+    Returns:
+      - vendor: "openmoney" | "zwitch" | None (None means mixed/unknown)
+      - intent: "explanatory" | "procedural" | "api" | "comparison"
+      - layer: Optional[str] (hard filter when confidence is high)
+      - boost_layers: List[str]
+      - n_results: int
+    """
+    q = (message or "").strip()
+    ql = q.lower()
+
+    # Intent
+    if any(k in ql for k in [" vs ", " versus ", "compare", "difference between", "difference b/w"]):
+        intent = "comparison"
+    elif any(k in ql for k in [" api", "endpoint", "webhook", "sdk", "curl", "post ", "get ", "/v1/"]):
+        intent = "api"
+    elif any(k in ql for k in ["how do i", "how to", "steps", "setup", "configure", "integrate", "implementation", "guide"]):
+        intent = "procedural"
+    else:
+        intent = "explanatory"
+
+    # Vendor
+    mentions_open = ("open money" in ql) or ("openmoney" in ql) or ("open.money" in ql)
+    mentions_zwitch = ("zwitch" in ql) or ("developers.zwitch" in ql) or ("zwitch.io" in ql)
+    # Common user phrasing: "in Open" meaning Open Money (avoid false matches like open-source/openapi).
+    mentions_open_platform = bool(re.search(r"\bin\s+open\b", ql)) and not bool(
+        re.search(r"\b(openai|open-source|open source|openapi)\b", ql)
+    )
+
+    # Strong hints: API-like queries almost always map to Zwitch in this KB.
+    looks_like_api = intent == "api" or bool(re.search(r"\b(post|get|put|delete|patch)\b", ql)) or ("/v1/" in ql)
+
+    vendor: Optional[str]
+    if (mentions_open or mentions_open_platform) and not mentions_zwitch:
+        vendor = "openmoney"
+    elif mentions_zwitch and not mentions_open:
+        vendor = "zwitch"
+    elif looks_like_api and not mentions_open:
+        vendor = "zwitch"
+    else:
+        vendor = None  # mixed/unknown
+
+    # Layer inference (soft by default; hard-filter only for high-confidence cases).
+    hard_layer: Optional[str] = None
+    boost_layers: List[str] = []
+
+    if vendor == "zwitch":
+        # Default Zwitch hierarchy boost.
+        boost_layers = ["states", "flows", "api", "concepts", "company", "faq", "best_practices"]
+        if intent == "api":
+            hard_layer = "api"
+            boost_layers = ["api", "states", "flows", "best_practices"]
+        elif any(k in ql for k in ["status", "lifecycle", "state"]):
+            hard_layer = "states"
+            boost_layers = ["states", "flows", "api", "concepts"]
+        elif any(k in ql for k in ["webhook", "happy path", "failure", "flow"]):
+            hard_layer = "flows"
+            boost_layers = ["flows", "states", "api", "concepts"]
+
+    elif vendor == "openmoney":
+        # Default Open Money hierarchy boost.
+        boost_layers = ["principles", "states", "workflows", "concepts", "modules", "products", "company", "faq", "risks", "data_semantics"]
+        if any(k in ql for k in ["status", "success", "failed", "pending", "settlement"]):
+            boost_layers = ["states", "principles", "risks", "workflows", "concepts", "faq"]
+        elif any(k in ql for k in ["reconcile", "reconciliation", "sync", "accounting", "tally", "zoho"]):
+            boost_layers = ["workflows", "principles", "modules", "concepts", "faq"]
+        elif any(k in ql for k in ["product", "products", "modules", "features", "offerings"]):
+            boost_layers = ["products", "modules", "concepts", "faq", "company"]
+        elif any(k in ql for k in ["invoice", "payment link", "collect", "receivable", "payable", "bill", "vendor payment"]):
+            boost_layers = ["workflows", "modules", "products", "concepts", "faq", "principles"]
+
+        # Never hard-filter to "api" for openmoney (KB should not treat it as API provider).
+        if looks_like_api:
+            boost_layers = ["concepts", "principles", "faq"]
+
+    else:
+        # Mixed/unknown: keep broad and boost overview-ish layers.
+        boost_layers = ["concepts", "products", "company", "faq", "principles", "states", "workflows", "api"]
+
+    # Retrieval size: larger for comparison and "what is" identity questions.
+    if intent == "comparison":
+        n_results = 14
+    elif any(k in ql for k in ["what is zwitch", "whats zwitch", "what's zwitch"]):
+        n_results = 24
+    elif any(k in ql for k in ["what is", "whats", "what's"]):
+        n_results = 16
+    else:
+        n_results = 10
+
+    return {
+        "vendor": vendor,
+        "intent": intent,
+        "layer": hard_layer,
+        "boost_layers": boost_layers,
+        "n_results": n_results,
+    }
 
 
 async def run_assistant(message: str, assistant_name: str, knowledge_base: str) -> Dict[str, Any]:
@@ -89,10 +195,26 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
         
         if config.use_rag and config.knowledge_base:
             logger.info(f"Retrieving context from knowledge base: {config.knowledge_base}")
+            vendor = None
+            layer = None
+            boost_layers = None
+            n_results = 10
+            cls: Dict[str, Any] = {}
+
+            if assistant_name == "fintech":
+                cls = _classify_fintech_query(message)
+                vendor = cls.get("vendor")
+                layer = cls.get("layer")
+                boost_layers = cls.get("boost_layers")
+                n_results = int(cls.get("n_results", 10))
+
             rag_result = await knowledge_pipeline.query(
                 user_query=message,
                 knowledge_base=config.knowledge_base,
-                n_results=10
+                n_results=n_results,
+                vendor=vendor,
+                layer=layer,
+                boost_layers=boost_layers,
             )
             context_text = rag_result.get("context", "")
             public_urls = rag_result.get("public_urls", [])
@@ -100,23 +222,62 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
         else:
             logger.info("RAG disabled for this assistant")
         
-        # Step 2: Build prompt
+        # Step 2: Build the user prompt body (system prompt is always applied separately)
+        # Special-case: if the user asks for API sample request/response bodies, extract them
+        # deterministically from retrieved context to prevent schema hallucination/reformatting.
+        if assistant_name == "fintech" and config.use_rag and context_text:
+            extracted = maybe_build_fintech_api_samples_answer(
+                context=context_text,
+                user_query=message,
+                vendor=cls.get("vendor"),
+            )
+            if extracted:
+                return {
+                    "assistant": assistant_name,
+                    "answer": extracted,
+                    "citations": sorted(public_urls) if public_urls else [],
+                    "metadata": {
+                        "model": "kb_extract",
+                        "provider": "kb_extract",
+                        "rag_used": True,
+                        "kb": config.knowledge_base,
+                        "usage": {
+                            "timestamp": "",
+                            "caller": assistant_name,
+                            "provider": "kb_extract",
+                            "model_id": "kb_extract",
+                            "intent": "analysis",
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "estimated_cost_usd": 0.0,
+                            "latency_ms": 0.0,
+                            "success": True,
+                            "error": None,
+                            "fallback_used": False,
+                            "fallback_reason": None,
+                        },
+                    },
+                }
+
         if config.use_rag and context_text:
             if assistant_name == "fintech":
-                prompt = build_fintech_prompt({
+                prompt_body = build_fintech_prompt({
                     "context": context_text,
                     "public_urls": public_urls,
-                    "query": message
+                    "query": message,
+                    "vendor": cls.get("vendor") if assistant_name == "fintech" else None,
+                    "intent": cls.get("intent") if assistant_name == "fintech" else None,
+                    "layer": cls.get("layer") if assistant_name == "fintech" else None,
                 })
             else:
-                prompt = build_generic_prompt({
+                prompt_body = build_generic_prompt({
                     "context": context_text,
                     "public_urls": public_urls,
                     "query": message
                 })
         else:
-            # No RAG - use direct prompt
-            prompt = f"{config.system_prompt}\n\nQuestion: {message}\n\nAnswer:"
+            # No RAG - just ask the question.
+            prompt_body = f"Question: {message}\n\nAnswer:"
         
         # Step 3: Call LLM Router (local-first with cloud fallback)
         # Router will:
@@ -133,13 +294,8 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
         
         logger.info(f"Calling LLM Router - Assistant: {assistant_name}, Intent: {intent.value}, Model preference: {config.model}")
         
-        # Build full prompt
-        if config.use_rag and context_text:
-            # RAG prompt already includes system instructions
-            full_prompt = prompt
-        else:
-            # No RAG - combine system prompt and user message
-            full_prompt = f"{config.system_prompt}\n\nQuestion: {message}\n\nAnswer:"
+        # Build full prompt (CRITICAL): system prompt must always be applied.
+        full_prompt = f"{config.system_prompt}\n\n{prompt_body}"
         
         # Generate completion through router
         try:

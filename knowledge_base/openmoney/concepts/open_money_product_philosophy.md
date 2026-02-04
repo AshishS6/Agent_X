@@ -2,7 +2,7 @@
 
 ## Core Philosophy
 
-Open Money is built on the principle that **financial orchestration requires clarity about data ownership and limitations**.
+Open Money is built on one simple idea: **know who owns the data and what its limits are**.
 
 ## Design Principles
 
@@ -11,7 +11,7 @@ Open Money is built on the principle that **financial orchestration requires cla
 Open Money aggregates data from multiple sources but does not own the primary truth. This principle shapes every feature:
 
 - Bank balances are aggregated, not owned
-- Payment statuses are reported, not guaranteed
+- Payment statuses are tracked from payment rails and should be reconciled against bank entries for financial finality
 - Compliance data is tracked, not created
 - Financial documents are managed, not finalized
 
@@ -46,7 +46,7 @@ All financial decisions must be made on the backend. The dashboard is informatio
 
 Open Money errs on the side of caution:
 
-- Does not assume payment success
+- Does not assume money is received until bank credits are reconciled
 - Does not assume bank sync accuracy
 - Does not assume reconciliation completeness
 - Does not assume data freshness
@@ -65,7 +65,6 @@ Open Money errs on the side of caution:
 ### What Open Money Does NOT Provide
 
 - Bank account ownership
-- Payment finality guarantees
 - Tax authority data
 - Accounting system replacement
 - Financial truth verification
@@ -74,7 +73,7 @@ Open Money errs on the side of caution:
 
 Users should understand Open Money as:
 
-> "A financial control center that helps me see, manage, and reconcile my business finances—but I must always verify critical decisions against source systems."
+> "A connected banking platform for business payments that helps me send, receive, and reconcile payments across my bank accounts—but I must always verify critical decisions against source systems."
 
 This mental model prevents:
 - Over-reliance on dashboard data

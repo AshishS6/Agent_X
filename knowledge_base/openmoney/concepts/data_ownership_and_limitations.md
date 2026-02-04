@@ -57,15 +57,9 @@ Open Money data freshness depends on:
 
 1. **Bank Sync Frequency**
    - Not real-time
-   - May be delayed by hours or days
-   - May fail silently
-
-2. **Webhook Delivery**
-   - May be delayed
-   - May fail to deliver
-   - May be processed out of order
-
-3. **Reconciliation Status**
+   - May be delayed but can sync manually
+   
+2. **Reconciliation Status**
    - Unreconciled data is provisional
    - Only reconciled data is confirmed
    - Reconciliation may lag behind transactions
@@ -109,7 +103,7 @@ When interpreting Open Money data:
 
 **Wrong:** "Payment shows success in Open Money, so it's final."
 
-**Correct:** "Payment shows success in Open Money, which means the transaction has been successfully processed and settled by Open Money (as a licensed Payment Aggregator). For pending transactions, cross-check with your bank as Open Money's status is updated based on bank callbacks."
+**Correct:** "Payment shows success in Open Money, which means the transaction has been successfully processed and settled by Open Money or Bank (as a licensed Payment Aggregator). For pending transactions, cross-check with your bank as Open Money's status is updated based on bank callbacks."
 
 ### Misinterpretation 3: Overdue Accuracy
 

@@ -1,5 +1,7 @@
 # Open Money KB Expansion Status
 
+> Note: This is an internal KB planning/status document. It is **not** a product source of truth and should not be used to answer user questions about Open Money capabilities.
+
 ## Overview
 
 This document tracks the status of the Open Money Knowledge Base expansion based on the comprehensive company overview provided.

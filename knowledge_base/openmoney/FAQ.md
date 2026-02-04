@@ -57,15 +57,15 @@ See [Platform Access](./products/api_solutions.md) for more details.
 
 ## How Reliable Are Open Money Transaction Statuses?
 
-**Open Money is a Payment Aggregator (PA) licensed by RBI and is liable for settlements.** Transaction statuses shown in Open Money are accurate and reliable:
+**Open Money is a Payment Aggregator (PA) licensed by RBI and is liable for settlements.** Transaction statuses are reliable for workflow state, but you should still use bank statements + reconciliation for financial finality:
 
 ### Transaction Statuses:
 
-- **Success Status**: When Open Money shows a transaction as "success", it means the transaction has been successfully processed and settled by Open Money. You can trust this status - it indicates the transaction is complete and settled.
+- **Success / Completed**: Reliable for workflow state (the rail reports success). For financial finality, verify via bank statement + reconciliation.
 
-- **Failed Status**: When Open Money shows a transaction as "failed", it means the transaction has failed. This status is accurate and reliable.
+- **Failed**: Reliable for workflow state (the rail reports failure).
 
-- **Pending Status**: When a transaction shows as "pending", it means the transaction is still being processed. In this case, it's best to cross-check with your bank for the latest status, as Open Money's status is updated based on callbacks from the respective bank.
+- **Pending / Processing**: In-flight and may change; cross-check with your bank for the latest status.
 
 ### Settlement Responsibility:
 
@@ -76,9 +76,11 @@ See [Platform Access](./products/api_solutions.md) for more details.
 ### Key Points:
 
 - Open Money is **liable for settlements** as a licensed Payment Aggregator
-- Success and failed statuses are **accurate and reliable**
+- Success and failed statuses are **reliable for workflow state**
 - Pending statuses require **cross-checking with your bank** as updates depend on bank callbacks
 - Open Money provides **real-time status updates** based on bank callbacks
+
+See also: [Transaction Status Reliability](./concepts/transaction_status_reliability.md).
 
 ---
 

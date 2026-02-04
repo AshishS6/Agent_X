@@ -1,5 +1,7 @@
 # Open Money Knowledge Base Expansion Plan
 
+> Note: This is an internal KB planning document. It is **not** a product source of truth and should not be used to answer user questions about Open Money capabilities.
+
 ## Executive Summary
 
 This document outlines a comprehensive plan to expand the Open Money Knowledge Base based on the detailed company overview provided. The plan identifies gaps, proposes new content structure, and provides implementation guidance.

@@ -10,6 +10,7 @@ Domain-specific prompt composition should be handled by the assistant layer.
 """
 
 import logging
+import os
 from typing import List, Optional, Set, Dict, Any
 from .retriever import RAGRetriever
 from ..vector_store.embedding_client import OllamaEmbeddingClient
@@ -86,6 +87,25 @@ class KnowledgePipeline:
         # Format context - NO internal source citations
         # Extract public URLs from context and source paths for citation
         if context_results:
+            # Optional debug logging (stderr only): helps validate retrieval quality.
+            if os.getenv("RAG_DEBUG", "").strip() == "1":
+                try:
+                    preview = []
+                    for r in context_results[:6]:
+                        md = r.get("metadata", {}) or {}
+                        preview.append(
+                            {
+                                "distance": r.get("distance"),
+                                "vendor": md.get("vendor"),
+                                "layer": md.get("layer"),
+                                "source_path": md.get("source_path"),
+                                "section_path": md.get("section_path"),
+                            }
+                        )
+                    logger.info(f"RAG_DEBUG top_hits={preview}")
+                except Exception:
+                    pass
+
             # Combine text without internal source citations
             context = "\n\n".join([r.get('text', '') for r in context_results])
             

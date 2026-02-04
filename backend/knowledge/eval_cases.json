@@ -1,0 +1,39 @@
+[
+  {
+    "id": "openmoney_what_is",
+    "query": "What is Open Money and what does it help a business do?",
+    "expected_vendor": "openmoney",
+    "expected_layers": ["concepts", "company", "products", "modules", "principles", "workflows", "faq"]
+  },
+  {
+    "id": "openmoney_transaction_status",
+    "query": "How reliable is Open Money payment status (success/failed/pending)? When should I verify with the bank?",
+    "expected_vendor": "openmoney",
+    "expected_layers": ["concepts", "risks", "states", "principles", "workflows", "faq"]
+  },
+  {
+    "id": "openmoney_products",
+    "query": "What products or modules does Open Money provide in its platform?",
+    "expected_vendor": "openmoney",
+    "expected_layers": ["products", "modules", "concepts", "faq"]
+  },
+  {
+    "id": "zwitch_products",
+    "query": "What products does Zwitch offer?",
+    "expected_vendor": "zwitch",
+    "expected_layers": ["company", "products", "concepts", "faq"]
+  },
+  {
+    "id": "zwitch_payout_api",
+    "query": "How do I integrate Zwitch payouts? What endpoint should I call and what fields are required?",
+    "expected_vendor": "zwitch",
+    "expected_layers": ["api", "flows", "states", "best_practices", "concepts"]
+  },
+  {
+    "id": "comparison_openmoney_vs_zwitch",
+    "query": "Compare Open Money and Zwitch. Which one provides APIs vs a business dashboard?",
+    "expected_vendor": "unknown",
+    "expected_layers": ["concepts", "company", "products", "faq"]
+  }
+]
+

@@ -228,7 +228,7 @@ class URLMapper:
         
         for url in found_urls:
             # Clean URL
-            clean_url = url.rstrip('.,;:!?)')
+            clean_url = url.strip("`").rstrip('.,;:!?)`')
             
             # STRICT: Validate it's a public URL (filters out .md files)
             if cls._is_valid_public_url(clean_url):

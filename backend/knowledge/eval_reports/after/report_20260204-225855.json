@@ -1,0 +1,122 @@
+{
+  "meta": {
+    "assistant": "fintech",
+    "knowledge_base": "fintech",
+    "runs": 3,
+    "n_results": 10,
+    "retrieval_only": false,
+    "ts": "20260204-225037"
+  },
+  "cases": [
+    {
+      "id": "openmoney_what_is",
+      "query": "What is Open Money and what does it help a business do?",
+      "expected_vendor": "openmoney",
+      "expected_layers": [
+        "concepts",
+        "company",
+        "products",
+        "modules",
+        "principles",
+        "workflows",
+        "faq"
+      ],
+      "answer_stability": 0.3333333333333333,
+      "vendor_purity_mean": 1.0,
+      "layer_purity_mean": 0.7,
+      "unsupported_rate_mean": 0.1377104377104377,
+      "uncertainty_rate": 0.0
+    },
+    {
+      "id": "openmoney_transaction_status",
+      "query": "How reliable is Open Money payment status (success/failed/pending)? When should I verify with the bank?",
+      "expected_vendor": "openmoney",
+      "expected_layers": [
+        "concepts",
+        "risks",
+        "states",
+        "principles",
+        "workflows",
+        "faq"
+      ],
+      "answer_stability": 0.3333333333333333,
+      "vendor_purity_mean": 1.0,
+      "layer_purity_mean": 0.4,
+      "unsupported_rate_mean": 0.0,
+      "uncertainty_rate": 0.0
+    },
+    {
+      "id": "openmoney_products",
+      "query": "What products or modules does Open Money provide in its platform?",
+      "expected_vendor": "openmoney",
+      "expected_layers": [
+        "products",
+        "modules",
+        "concepts",
+        "faq"
+      ],
+      "answer_stability": 0.3333333333333333,
+      "vendor_purity_mean": 0.5,
+      "layer_purity_mean": 0.5,
+      "unsupported_rate_mean": 0.0,
+      "uncertainty_rate": 0.0
+    },
+    {
+      "id": "zwitch_products",
+      "query": "What products does Zwitch offer?",
+      "expected_vendor": "zwitch",
+      "expected_layers": [
+        "company",
+        "products",
+        "concepts",
+        "faq"
+      ],
+      "answer_stability": 0.3333333333333333,
+      "vendor_purity_mean": 0.0,
+      "layer_purity_mean": 0.3,
+      "unsupported_rate_mean": 0.39012345679012345,
+      "uncertainty_rate": 0.0
+    },
+    {
+      "id": "zwitch_payout_api",
+      "query": "How do I integrate Zwitch payouts? What endpoint should I call and what fields are required?",
+      "expected_vendor": "zwitch",
+      "expected_layers": [
+        "api",
+        "flows",
+        "states",
+        "best_practices",
+        "concepts"
+      ],
+      "answer_stability": 0.3333333333333333,
+      "vendor_purity_mean": 0.5,
+      "layer_purity_mean": 0.4,
+      "unsupported_rate_mean": 0.047619047619047616,
+      "uncertainty_rate": 0.6666666666666666
+    },
+    {
+      "id": "comparison_openmoney_vs_zwitch",
+      "query": "Compare Open Money and Zwitch. Which one provides APIs vs a business dashboard?",
+      "expected_vendor": "unknown",
+      "expected_layers": [
+        "concepts",
+        "company",
+        "products",
+        "faq"
+      ],
+      "answer_stability": 0.3333333333333333,
+      "vendor_purity_mean": 1.0,
+      "layer_purity_mean": 0.7,
+      "unsupported_rate_mean": 0.030303030303030304,
+      "uncertainty_rate": 0.0
+    }
+  ],
+  "aggregate": {
+    "avg_answer_stability": 0.3333333333333333,
+    "avg_vendor_purity_mean": 0.6666666666666666,
+    "avg_layer_purity_mean": 0.5,
+    "avg_unsupported_rate_mean": 0.10095932873710652,
+    "avg_uncertainty_rate": 0.1111111111111111,
+    "raw_jsonl": "backend/knowledge/eval_reports/after/raw_20260204-225037.jsonl"
+  }
+}

@@ -110,14 +110,7 @@ Lending products:
 
 ### 6. API Developer Access
 
-**Extensibility for custom integrations**
-
-Capabilities:
-- Developer APIs for payment integration
-- Beneficiary management through APIs
-- Transaction processing and settlement
-- Real-time payment status tracking
-- Account connectivity and balance visibility
+APIs are provided by Zwitch. Open Money users can navigate to the Apps section in the Open Money dashboard and use the Developers section to be redirected to Zwitch.
 
 ### 7. Corporate Cards
 

@@ -179,6 +179,8 @@ When information conflicts or ambiguity arises, **higher layers override lower l
 **Files:**
 - `what_is_open_money.md` — Open Money identity
 - `open_money_product_philosophy.md` — Product philosophy
+- `transaction_status_reliability.md` — What to trust vs what to verify for statuses
+- `non_support_boundaries.md` — Product boundaries for what not to assume
 - `open_money_vs_bank.md` — Platform comparison
 - `open_money_vs_accounting_software.md` — Software comparison
 - `data_ownership_and_limitations.md` — Data boundaries

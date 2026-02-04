@@ -11,6 +11,7 @@ import chromadb
 from chromadb.config import Settings
 import os
 import logging
+import hashlib
 from typing import List, Dict, Optional
 from pathlib import Path
 
@@ -83,10 +84,16 @@ class ChromaDBStore:
         """
         collection = self.get_collection(knowledge_base)
         
-        # Generate IDs
-        # Note: Python hash() is not stable across runs, but collision risk is low
-        # For production, consider using UUIDs or content-hash (sha256) for stability
-        ids = [f"doc_{i}_{hash(text[:50])}" for i, text in enumerate(texts)]
+        # Generate stable, content-based IDs to prevent duplicates across re-ingests.
+        # ID includes source_path + chunk_index when available (best-effort), plus content hash.
+        safe_metadatas = metadatas or [{} for _ in texts]
+        ids: List[str] = []
+        for i, (text, md) in enumerate(zip(texts, safe_metadatas)):
+            md = md or {}
+            source_path = str(md.get("source_path") or "unknown")
+            chunk_index = md.get("chunk_index", i)
+            content_hash = hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
+            ids.append(f"{source_path}:{chunk_index}:{content_hash}")
         
         # Prepare metadatas - ChromaDB requires at least one key-value pair
         if metadatas is None:
@@ -95,12 +102,21 @@ class ChromaDBStore:
             # Ensure each metadata dict has at least one key
             metadatas = [md if md else {"chunk_index": i} for i, md in enumerate(metadatas)]
         
-        collection.add(
-            embeddings=embeddings,
-            documents=texts,
-            metadatas=metadatas,
-            ids=ids
-        )
+        # Prefer upsert to allow repeatable re-ingestion without errors.
+        if hasattr(collection, "upsert"):
+            collection.upsert(
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=metadatas,
+                ids=ids,
+            )
+        else:
+            collection.add(
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=metadatas,
+                ids=ids,
+            )
     
     def query(
         self,

@@ -19,7 +19,7 @@ Open Money sits **between**:
 - Compliance systems
 - Business users
 
-Its role is to **orchestrate**, not to finalize.
+Its role is to orchestrate, not to finalize.
 
 ## What Open Money Does
 
@@ -46,15 +46,17 @@ Open Money provides a **platform/dashboard/app** that enables businesses to:
 
 Open Money provides accurate transaction statuses based on real-time updates:
 
-- **Success Status**: When Open Money shows a transaction as "success", it means the transaction has been successfully processed and settled. You can trust this status.
-- **Failed Status**: When Open Money shows a transaction as "failed", it means the transaction has failed. This status is accurate and reliable.
-- **Pending Status**: When a transaction shows as "pending", it means the transaction is still being processed. In this case, it's best to cross-check with your bank for the latest status, as Open Money's status is updated based on callbacks from the respective bank.
+- **Success / Completed**: Reliable for workflow state (the rail reports success). For financial finality, still verify via bank statement + reconciliation.
+- **Failed**: Reliable for workflow state (the rail reports failure).
+- **Pending / Processing**: In-flight and may change; cross-check with your bank for the latest status.
 
 ### Settlement Responsibility
 
 - **Open Money is responsible for settlements** as a licensed Payment Aggregator (PA) under RBI regulations.
 - Settlements are processed by Open Money, not by banks directly.
 - In cases where a transaction goes to a pending status, Open Money depends on the bank to provide callbacks or status updates to update the transaction status accordingly.
+
+For a canonical “what to trust vs what to verify” guide, see [Transaction Status Reliability](./transaction_status_reliability.md).
 
 ### What Open Money Does Not Do
 

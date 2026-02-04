@@ -141,12 +141,30 @@ class OllamaClient:
         generate_client = httpx.AsyncClient(timeout=self.streaming_timeout)
         
         try:
+            # Default to deterministic generation for stability.
+            # Can be overridden via env vars when needed.
+            temperature = float(os.getenv("OLLAMA_TEMPERATURE", "0"))
+            top_p = float(os.getenv("OLLAMA_TOP_P", "1"))
+            top_k = int(os.getenv("OLLAMA_TOP_K", "0"))  # 0 lets Ollama decide / disables
+            seed_env = os.getenv("OLLAMA_SEED", "").strip()
+            seed = int(seed_env) if seed_env else None
+
+            options = {
+                "temperature": temperature,
+                "top_p": top_p,
+            }
+            if top_k > 0:
+                options["top_k"] = top_k
+            if seed is not None:
+                options["seed"] = seed
+
             response = await generate_client.post(
                 f"{self.base_url}/api/generate",
                 json={
                     "model": model,
                     "prompt": prompt,
-                    "stream": stream
+                    "stream": stream,
+                    "options": options,
                 }
             )
             response.raise_for_status()
