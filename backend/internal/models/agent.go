@@ -33,6 +33,30 @@ func NewAgentRepository() *AgentRepository {
 	return &AgentRepository{}
 }
 
+// EnsureByType makes sure an agent row exists for agentType.
+// This is useful when new tools are added but the DB wasn't reseeded/migrated yet.
+// It is safe to call concurrently.
+func (r *AgentRepository) EnsureByType(agentType, name, description string, status AgentStatus) error {
+	if agentType == "" {
+		return nil
+	}
+	if name == "" {
+		name = agentType
+	}
+	if status == "" {
+		status = AgentStatusActive
+	}
+
+	// Insert-if-missing; rely on UNIQUE(type)
+	query := `
+		INSERT INTO agents (type, name, description, status, config)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb)
+		ON CONFLICT (type) DO NOTHING
+	`
+	_, err := database.DB.Exec(query, agentType, name, description, status)
+	return err
+}
+
 func (r *AgentRepository) FindAll() ([]Agent, error) {
 	query := `SELECT id, type, name, description, status, config, created_at, updated_at FROM agents ORDER BY created_at DESC`
 

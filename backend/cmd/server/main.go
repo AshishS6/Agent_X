@@ -76,6 +76,8 @@ func main() {
 	mccHandler := handlers.NewMccHandler()
 	assistantsHandler := handlers.NewAssistantsHandler(projectRoot)
 	blogDocumentsHandler := handlers.NewBlogDocumentsHandler(executor)
+	integrationsHandler := handlers.NewIntegrationsHandler()
+	workflowsHandler := handlers.NewWorkflowsHandler(executor)
 
 	// Initialize MCC Tables & Seed Data
 	if err := models.InitMccTables(); err != nil {
@@ -95,13 +97,15 @@ func main() {
 			"version": "2.0.0",
 			"status":  "running",
 			"endpoints": gin.H{
-				"agents":     "/api/agents",
-				"tasks":      "/api/tasks",
-				"tools":      "/api/tools",
-				"monitoring": "/api/monitoring",
-				"health":     "/api/monitoring/health",
-				"mccs":       "/api/mccs",
-				"blog":       "/api/blog/documents",
+				"agents":       "/api/agents",
+				"tasks":        "/api/tasks",
+				"tools":        "/api/tools",
+				"monitoring":   "/api/monitoring",
+				"health":       "/api/monitoring/health",
+				"mccs":         "/api/mccs",
+				"blog":         "/api/blog/documents",
+				"workflows":    "/api/workflows",
+				"integrations": "/api/integrations",
 			},
 		})
 	})
@@ -157,20 +161,54 @@ func main() {
 			assistants.POST("/:name/chat", assistantsHandler.Chat)
 		}
 
+		// Integrations routes
+		integrations := api.Group("/integrations")
+		{
+			integrations.GET("", integrationsHandler.GetAll)
+			integrations.POST("", integrationsHandler.Create)
+			integrations.PUT("/:id", integrationsHandler.Update)
+			integrations.DELETE("/:id", integrationsHandler.Delete)
+		}
+
+		// Workflows routes
+		workflows := api.Group("/workflows")
+		{
+			workflows.GET("", workflowsHandler.GetAll)
+			workflows.POST("", workflowsHandler.Create)
+			workflows.GET("/:id", workflowsHandler.GetByID)
+			workflows.PUT("/:id", workflowsHandler.Update)
+			workflows.POST("/:id/pause", workflowsHandler.Pause)
+			workflows.POST("/:id/activate", workflowsHandler.Activate)
+
+			// Runs
+			workflows.GET("/:id/runs", workflowsHandler.GetRuns)
+			// Cases
+			workflows.GET("/:id/cases", workflowsHandler.GetCases)
+		}
+		api.GET("/workflow-runs/:runId", workflowsHandler.GetRunByID)
+		api.GET("/workflow-cases/:caseId", workflowsHandler.GetCaseByID)
+		api.GET("/workflow-cases/:caseId/runs", workflowsHandler.GetRunsForCase)
+
+		// Triggers
+		triggers := api.Group("/triggers")
+		{
+			triggers.POST("/freshdesk/:workflowId", workflowsHandler.TriggerFreshdesk)
+		}
+
 		// Blog Documents routes (v2)
 		blog := api.Group("/blog")
 		{
 			documents := blog.Group("/documents")
 			{
-			documents.POST("", blogDocumentsHandler.Create)
-			documents.GET("", blogDocumentsHandler.List)
-			documents.GET("/:id", blogDocumentsHandler.GetByID)
-			documents.POST("/:id/outlines", blogDocumentsHandler.GenerateOutline)
-			documents.PUT("/:id/outlines/:versionId", blogDocumentsHandler.UpdateOutlineStatus)
-			documents.PUT("/:id/outlines/:versionId/structure", blogDocumentsHandler.UpdateOutlineStructure)
-			documents.POST("/:id/outlines/:versionId/feedback", blogDocumentsHandler.AddFeedback)
-			documents.POST("/:id/drafts", blogDocumentsHandler.GenerateDraft)
-			documents.POST("/:id/drafts/:versionId/feedback", blogDocumentsHandler.AddFeedback)
+				documents.POST("", blogDocumentsHandler.Create)
+				documents.GET("", blogDocumentsHandler.List)
+				documents.GET("/:id", blogDocumentsHandler.GetByID)
+				documents.POST("/:id/outlines", blogDocumentsHandler.GenerateOutline)
+				documents.PUT("/:id/outlines/:versionId", blogDocumentsHandler.UpdateOutlineStatus)
+				documents.PUT("/:id/outlines/:versionId/structure", blogDocumentsHandler.UpdateOutlineStructure)
+				documents.POST("/:id/outlines/:versionId/feedback", blogDocumentsHandler.AddFeedback)
+				documents.POST("/:id/drafts", blogDocumentsHandler.GenerateDraft)
+				documents.POST("/:id/drafts/:versionId/feedback", blogDocumentsHandler.AddFeedback)
 			}
 		}
 	}

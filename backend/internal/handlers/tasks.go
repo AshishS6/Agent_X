@@ -17,9 +17,9 @@ import (
 
 // TasksHandler handles task-related HTTP requests
 type TasksHandler struct {
-	taskRepo *models.TaskRepository
+	taskRepo  *models.TaskRepository
 	agentRepo *models.AgentRepository
-	executor *tools.Executor
+	executor  *tools.Executor
 }
 
 // NewTasksHandler creates a new tasks handler
@@ -128,11 +128,11 @@ func (h *TasksHandler) GetStatusCounts(c *gin.Context) {
 func (h *TasksHandler) DownloadReport(c *gin.Context) {
 	id := c.Param("id")
 	format := c.Query("format")
-	
+
 	if format == "" {
 		format = "json" // Default
 	}
-	
+
 	if format != "pdf" && format != "json" && format != "markdown" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -140,7 +140,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Get task
 	task, err := h.taskRepo.FindByID(id)
 	if err != nil {
@@ -151,7 +151,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	if task == nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"success": false,
@@ -159,7 +159,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Validate task is completed
 	if task.Status != models.TaskStatusCompleted {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -168,7 +168,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Extract scan data from task output
 	var scanData map[string]any
 	if task.Output != nil {
@@ -181,7 +181,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 			return
 		}
 	}
-	
+
 	// Get comprehensive_site_scan from response
 	var finalScanData map[string]any
 	if response, ok := scanData["response"].(string); ok {
@@ -201,7 +201,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		// Try direct access
 		finalScanData = scanData
 	}
-	
+
 	agent, err := h.agentRepo.FindByID(task.AgentID)
 	if err != nil {
 		log.Printf("[TasksHandler] Error fetching agent for task %s: %v", id, err)
@@ -228,19 +228,19 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Prepare CLI input
 	cliInput := map[string]any{
 		"action":    "download_report",
 		"task_id":   id,
-		"format":     format,
+		"format":    format,
 		"scan_data": finalScanData,
 	}
-	
+
 	// Execute report generation
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	
+
 	result, err := h.executor.Execute(ctx, tool, cliInput)
 	if err != nil {
 		log.Printf("[TasksHandler] Report generation error: %v", err)
@@ -250,7 +250,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	if result.Status == "failed" {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -258,7 +258,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Extract content and content type
 	output := result.Output
 	contentType, ok := output["content_type"].(string)
@@ -273,7 +273,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// Decode base64 for PDF
 	var fileContent []byte
 	if format == "pdf" {
@@ -289,7 +289,7 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 	} else {
 		fileContent = []byte(content)
 	}
-	
+
 	// Generate filename
 	url := ""
 	if scan, ok := finalScanData["comprehensive_site_scan"].(map[string]any); ok {
@@ -307,14 +307,14 @@ func (h *TasksHandler) DownloadReport(c *gin.Context) {
 		// Clean domain
 		domain = sanitizeDomain(domain)
 	}
-	
+
 	filename := generateFilename(domain, id, format)
-	
+
 	// Set headers - quote filename to handle special characters
 	c.Header("Content-Type", contentType)
 	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
 	c.Data(http.StatusOK, contentType, fileContent)
-	
+
 	// Log download event (audit logging)
 	logDownloadEvent(id, format, task.UserID)
 }
@@ -325,8 +325,8 @@ func sanitizeDomain(domain string) string {
 	// Simple sanitization for filename
 	result := ""
 	for _, char := range domain {
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || 
-		   (char >= '0' && char <= '9') || char == '.' || char == '-' {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '-' {
 			result += string(char)
 		} else {
 			result += "_"
@@ -340,7 +340,7 @@ func sanitizeDomain(domain string) string {
 
 func generateFilename(domain string, scanID string, format string) string {
 	date := time.Now().Format("2006-01-02")
-	
+
 	switch format {
 	case "pdf":
 		return "site_compliance_" + domain + "_" + scanID + "_" + date + ".pdf"

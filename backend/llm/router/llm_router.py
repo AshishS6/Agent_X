@@ -17,6 +17,7 @@ All LLM calls MUST go through this router.
 import os
 import time
 import logging
+import re
 from typing import Optional, Dict, Any, List, Union
 from enum import Enum
 
@@ -176,6 +177,7 @@ class LLMRouter:
         # Default models from env
         self.default_local_model = os.getenv("LLM_LOCAL_MODEL", "qwen2.5:7b-instruct")
         self.default_cloud_model = os.getenv("LLM_CLOUD_MODEL", "openai:gpt-4-turbo-preview")
+        self.model_overrides = self._load_model_overrides()
         
         logger.info(
             f"🔀 LLM Router initialized - Mode: {self.mode.value}, "
@@ -185,6 +187,104 @@ class LLMRouter:
         # Initialize health checks (async, non-blocking)
         # This pre-warms the health cache
         self._initialize_health_checks()
+
+    def _normalize_caller_key(self, caller: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", (caller or "").strip().lower()).strip("_")
+
+    def _load_model_overrides(self) -> Dict[str, Dict[str, str]]:
+        """
+        Load model override rules from environment.
+
+        Supported env vars:
+        - LLM_MODEL_OVERRIDES:
+          "caller:blog=ollama:llama3.2:8b,intent:long_form=ollama:llama3.2:8b"
+        - LLM_MODEL_OVERRIDE_<CALLER>:
+          "ollama:llama3.2:8b" (caller key normalized to upper snake case)
+        - LLM_MODEL_OVERRIDE_INTENT_<INTENT>:
+          "ollama:deepseek-r1:7b"
+        """
+        overrides: Dict[str, Dict[str, str]] = {"caller": {}, "intent": {}}
+
+        encoded = (os.getenv("LLM_MODEL_OVERRIDES", "") or "").strip()
+        if encoded:
+            parts = [p.strip() for p in encoded.split(",") if p.strip()]
+            for part in parts:
+                if "=" not in part:
+                    continue
+                key, model = part.split("=", 1)
+                key = key.strip().lower()
+                model = model.strip()
+                if not model:
+                    continue
+
+                if key.startswith("caller:"):
+                    caller_key = self._normalize_caller_key(key.split(":", 1)[1])
+                    if caller_key:
+                        overrides["caller"][caller_key] = model
+                elif key.startswith("intent:"):
+                    intent_key = key.split(":", 1)[1].strip().lower()
+                    if intent_key:
+                        overrides["intent"][intent_key] = model
+
+        for env_name, value in os.environ.items():
+            if not value:
+                continue
+            if env_name.startswith("LLM_MODEL_OVERRIDE_INTENT_"):
+                intent_key = env_name.replace("LLM_MODEL_OVERRIDE_INTENT_", "", 1).strip().lower()
+                if intent_key:
+                    overrides["intent"][intent_key] = value.strip()
+            elif env_name.startswith("LLM_MODEL_OVERRIDE_"):
+                suffix = env_name.replace("LLM_MODEL_OVERRIDE_", "", 1).strip()
+                if suffix and suffix != "INTENT":
+                    caller_key = self._normalize_caller_key(suffix.lower())
+                    if caller_key:
+                        overrides["caller"][caller_key] = value.strip()
+
+        if overrides["caller"] or overrides["intent"]:
+            logger.info(
+                "🧭 LLM model overrides loaded - callers: %s, intents: %s",
+                sorted(overrides["caller"].keys()),
+                sorted(overrides["intent"].keys()),
+            )
+
+        return overrides
+
+    def _resolve_model_preference(
+        self,
+        caller: str,
+        intent: Optional[Intent],
+        model_preference: Optional[str],
+    ) -> Optional[str]:
+        """
+        Resolve effective model preference with override precedence.
+
+        Priority:
+        1) Caller-specific override
+        2) Intent-specific override
+        3) Provided model_preference
+        """
+        caller_key = self._normalize_caller_key(caller)
+        intent_key = (intent.value if intent else "").lower()
+
+        caller_override = self.model_overrides.get("caller", {}).get(caller_key)
+        if caller_override:
+            logger.info(
+                "🎯 Caller model override applied - caller: %s, model: %s",
+                caller,
+                caller_override,
+            )
+            return caller_override
+
+        intent_override = self.model_overrides.get("intent", {}).get(intent_key)
+        if intent_override:
+            logger.info(
+                "🎯 Intent model override applied - intent: %s, model: %s",
+                intent_key,
+                intent_override,
+            )
+            return intent_override
+
+        return model_preference
     
     def _initialize_health_checks(self):
         """Initialize health checks for all providers (non-blocking)"""
@@ -406,14 +506,21 @@ class LLMRouter:
         Returns:
             Tuple of (provider, model_id, fallback_used, fallback_reason)
         """
+        # Resolve effective model preference (caller/intent overrides may replace defaults)
+        effective_model_preference = self._resolve_model_preference(
+            caller=caller,
+            intent=intent,
+            model_preference=model_preference,
+        )
+
         # If model preference is specified, try to use it
         preferred_provider = None
         preferred_model = None
         
-        if model_preference:
+        if effective_model_preference:
             # Check if it's a full model ID (provider:model)
-            if ":" in model_preference:
-                parts = model_preference.split(":", 1)
+            if ":" in effective_model_preference:
+                parts = effective_model_preference.split(":", 1)
                 potential_provider = parts[0].lower()
                 
                 # Check if first part is a known provider
@@ -426,20 +533,20 @@ class LLMRouter:
                     # Try to find in registry
                     model_info = None
                     for provider in [Provider.OLLAMA, Provider.OPENAI, Provider.ANTHROPIC]:
-                        model_id = self.registry.parse_model_id(provider.value, model_preference)
+                        model_id = self.registry.parse_model_id(provider.value, effective_model_preference)
                         model_info = self.registry.get_model(model_id)
                         if model_info:
                             preferred_provider = provider.value
-                            preferred_model = model_preference
+                            preferred_model = effective_model_preference
                             break
                     
                     if not model_info:
                         # Default to local
                         preferred_provider = Provider.OLLAMA.value
-                        preferred_model = model_preference
+                        preferred_model = effective_model_preference
             else:
                 # Just model name (e.g., "qwen2.5:7b-instruct" without provider prefix)
-                preferred_model = model_preference
+                preferred_model = effective_model_preference
                 # Try to find in registry
                 model_info = None
                 for provider in [Provider.OLLAMA, Provider.OPENAI, Provider.ANTHROPIC]:
@@ -506,7 +613,7 @@ class LLMRouter:
                         raise ValueError(f"Provider {provider_name} is not available ({status.value})")
                 
                 # Select model
-                if model_preference and provider_name == preferred_provider:
+                if effective_model_preference and provider_name == preferred_provider:
                     model_id = self.registry.parse_model_id(provider_name, preferred_model)
                 else:
                     # Use LLM_LOCAL_MODEL / LLM_CLOUD_MODEL when set; else registry default

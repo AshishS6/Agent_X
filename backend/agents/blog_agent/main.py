@@ -91,6 +91,121 @@ Always produce structured, publishable-quality content."""
         words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?", text)
         return len(words)
 
+    def _decode_json_like_string(self, value: str) -> str:
+        """Best-effort decode for JSON-like string fragments."""
+        if value is None:
+            return ""
+        try:
+            return json.loads(f"\"{value}\"")
+        except Exception:
+            # Fallback for partially escaped payloads.
+            return (
+                value.replace("\\r\\n", "\n")
+                .replace("\\n", "\n")
+                .replace("\\r", "\n")
+                .replace("\\t", "\t")
+                .replace('\\"', '"')
+                .replace("\\\\", "\\")
+            )
+
+    def _extract_post_data_from_llm_response(self, response_text: str) -> Dict[str, Any]:
+        """
+        Parse post JSON from LLM output.
+
+        Handles common local-model failure modes:
+        - fenced markdown JSON (with or without trailing fence)
+        - stray preamble/suffix text around JSON
+        - partially escaped JSON strings
+        """
+        raw = (response_text or "").strip()
+        if not raw:
+            raise ValueError("Empty response from LLM")
+
+        # Remove common leading/trailing markdown fences first.
+        unfenced = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE).strip()
+        unfenced = re.sub(r"\s*```\s*$", "", unfenced).strip()
+
+        candidates = []
+        for candidate in (raw, unfenced):
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        first_brace = unfenced.find("{")
+        if first_brace != -1:
+            from_first = unfenced[first_brace:].strip()
+            if from_first and from_first not in candidates:
+                candidates.append(from_first)
+            last_brace = from_first.rfind("}")
+            if last_brace != -1:
+                bounded = from_first[: last_brace + 1].strip()
+                if bounded and bounded not in candidates:
+                    candidates.append(bounded)
+
+        parse_error = None
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError as e:
+                parse_error = e
+                # Remove invalid control chars and retry.
+                cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', candidate)
+                try:
+                    return json.loads(cleaned)
+                except json.JSONDecodeError as e2:
+                    parse_error = e2
+
+        # Fallback: extract fields from JSON-like text (handles unescaped newlines in "content").
+        text = candidates[-1] if candidates else raw
+
+        title = ""
+        title_match = re.search(r'"title"\s*:\s*"((?:\\.|[^"\\])*)"', text, re.DOTALL)
+        if title_match:
+            title = self._decode_json_like_string(title_match.group(1)).strip()
+
+        content = ""
+        content_patterns = [
+            r'"content"\s*:\s*"([\s\S]*?)"\s*,\s*"(?:meta_description|word_count)"\s*:',
+            r'"content"\s*:\s*"([\s\S]*?)"\s*}\s*$',
+            r'"content"\s*:\s*"([\s\S]*)$',
+        ]
+        for pattern in content_patterns:
+            match = re.search(pattern, text, re.DOTALL)
+            if match:
+                content = match.group(1)
+                break
+        content = self._decode_json_like_string(content).strip()
+
+        meta_description = ""
+        meta_match = re.search(r'"meta_description"\s*:\s*"((?:\\.|[^"\\])*)"', text, re.DOTALL)
+        if meta_match:
+            meta_description = self._decode_json_like_string(meta_match.group(1)).strip()
+
+        word_count = 0
+        wc_match = re.search(r'"word_count"\s*:\s*(\d+)', text)
+        if wc_match:
+            try:
+                word_count = int(wc_match.group(1))
+            except Exception:
+                word_count = 0
+
+        if not content:
+            self.logger.error(f"Failed to parse post JSON: {parse_error}")
+            self.logger.error(f"Response was (first 1000 chars): {raw[:1000]}")
+            raise ValueError(f"Failed to parse post response as JSON: {parse_error}")
+
+        if not word_count:
+            word_count = self._count_words_markdown(content)
+
+        self.logger.warning(
+            "Recovered post payload using JSON-like fallback parser; model response was not strict JSON"
+        )
+        return {
+            "title": title,
+            "content": content,
+            "meta_description": meta_description,
+            "word_count": word_count,
+        }
+
     def _title_case_heading(self, heading: str) -> str:
         """
         Title Case rules (approx. OPEN/Zwitch guideline):
@@ -642,24 +757,7 @@ Return only valid JSON, no additional text."""
         response = self.llm.invoke(messages)
         
         # Parse JSON response
-        response_text = response.content.strip()
-        
-        # Extract JSON if wrapped in markdown code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', response_text, re.DOTALL)
-        if json_match:
-            response_text = json_match.group(1)
-        else:
-            # Try to find JSON object in response
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                response_text = json_match.group(0)
-        
-        try:
-            post_data = json.loads(response_text)
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse post JSON: {e}")
-            self.logger.error(f"Response was: {response_text}")
-            raise ValueError(f"Failed to parse post response as JSON: {str(e)}")
+        post_data = self._extract_post_data_from_llm_response(response.content)
         
         # Calculate reading time (average reading speed: 200 words per minute)
         word_count = post_data.get("word_count", 0)
@@ -1030,72 +1128,8 @@ Return only valid JSON, no additional text."""
         
         response = self.llm.invoke(messages)
         
-        # Parse JSON response
-        response_text = response.content.strip()
-        
-        # Extract JSON if wrapped in markdown code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{.*\})\s*```', response_text, re.DOTALL)
-        if json_match:
-            response_text = json_match.group(1)
-        else:
-            # Try to find JSON object in response
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-            if json_match:
-                response_text = json_match.group(0)
-        
-        # Parse JSON with robust error handling for control characters
-        try:
-            post_data = json.loads(response_text)
-        except json.JSONDecodeError as e:
-            # Try to fix common JSON issues: unescaped control characters in strings
-            # Use a more lenient JSON parser approach
-            try:
-                # Remove invalid control characters (keep \n, \r, \t but they must be escaped)
-                # First pass: remove truly invalid chars
-                cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', response_text)
-                
-                # Try parsing again
-                try:
-                    post_data = json.loads(cleaned)
-                    self.logger.warning("Successfully parsed JSON after removing control characters")
-                except json.JSONDecodeError:
-                    # Last resort: manually fix the content field which often has unescaped newlines
-                    # Find the content field value and escape newlines properly
-                    import json as json_module
-                    
-                    # Try using json.JSONDecoder with a custom error handler
-                    # Or manually escape the content field
-                    content_pattern = r'"content"\s*:\s*"'
-                    match = re.search(content_pattern, cleaned)
-                    if match:
-                        start = match.end()
-                        # Find the matching closing quote, handling escaped quotes
-                        end = start
-                        while end < len(cleaned):
-                            if cleaned[end] == '\\':
-                                end += 2  # Skip escaped character
-                                continue
-                            if cleaned[end] == '"':
-                                break
-                            end += 1
-                        
-                        if end < len(cleaned):
-                            # Extract and escape the content
-                            content_value = cleaned[start:end]
-                            # Properly escape for JSON
-                            escaped = json_module.dumps(content_value)[1:-1]  # Remove outer quotes
-                            fixed = cleaned[:start] + escaped + cleaned[end:]
-                            post_data = json.loads(fixed)
-                            self.logger.warning("Successfully parsed JSON after escaping content field")
-                        else:
-                            raise
-                    else:
-                        raise
-            except Exception as e2:
-                self.logger.error(f"Failed to parse post JSON: {e}")
-                self.logger.error(f"Cleaning attempt also failed: {e2}")
-                self.logger.error(f"Response was (first 1000 chars): {response_text[:1000]}")
-                raise ValueError(f"Failed to parse post response as JSON: {str(e)}")
+        # Parse JSON response (robust to fenced/partially escaped model outputs)
+        post_data = self._extract_post_data_from_llm_response(response.content)
 
         # Normalize + lint + optional rewrite to match house style
         try:

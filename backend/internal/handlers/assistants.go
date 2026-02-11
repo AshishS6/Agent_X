@@ -37,18 +37,18 @@ type ChatRequest struct {
 // ChatResponse is the response from assistant chat
 // This contract is LOCKED - do not change without frontend coordination
 type ChatResponse struct {
-	Assistant string      `json:"assistant"`  // Required: assistant name
-	Answer    string      `json:"answer"`     // Required: markdown-formatted answer
-	Citations []string    `json:"citations"`  // Required: array of public URLs (empty if none)
+	Assistant string       `json:"assistant"` // Required: assistant name
+	Answer    string       `json:"answer"`    // Required: markdown-formatted answer
+	Citations []string     `json:"citations"` // Required: array of public URLs (empty if none)
 	Metadata  ChatMetadata `json:"metadata"`  // Required: structured metadata
 }
 
 // ChatMetadata contains structured metadata about the response
 type ChatMetadata struct {
 	Model     string `json:"model"`      // LLM model used
-	Provider  string `json:"provider"`  // LLM provider (ollama, openai, etc.)
-	RagUsed   bool   `json:"rag_used"`  // Whether RAG context was used
-	KB        string `json:"kb"`        // Knowledge base name (empty if no RAG)
+	Provider  string `json:"provider"`   // LLM provider (ollama, openai, etc.)
+	RagUsed   bool   `json:"rag_used"`   // Whether RAG context was used
+	KB        string `json:"kb"`         // Knowledge base name (empty if no RAG)
 	LatencyMs int64  `json:"latency_ms"` // Request latency in milliseconds
 }
 
@@ -119,12 +119,12 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 		"LLM_FALLBACK_ENABLED="+os.Getenv("LLM_FALLBACK_ENABLED"),
 		"LLM_LOCAL_MODEL="+os.Getenv("LLM_LOCAL_MODEL"),
 		"LLM_CLOUD_MODEL="+os.Getenv("LLM_CLOUD_MODEL"),
-		
+
 		// Provider Configuration
 		"OLLAMA_BASE_URL="+os.Getenv("OLLAMA_BASE_URL"),
 		"OPENAI_API_KEY="+os.Getenv("OPENAI_API_KEY"),
 		"ANTHROPIC_API_KEY="+os.Getenv("ANTHROPIC_API_KEY"),
-		
+
 		// Python Path
 		"PYTHONPATH="+filepath.Join(h.projectRoot, "backend"),
 	)

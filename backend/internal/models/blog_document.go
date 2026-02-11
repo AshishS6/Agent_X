@@ -41,38 +41,38 @@ const (
 
 // BlogDocument represents a blog document
 type BlogDocument struct {
-	ID             string     `json:"id"`
-	Brand          BlogBrand  `json:"brand"`
-	Topic          string     `json:"topic"`
-	TargetAudience string     `json:"target_audience"`
-	Intent         string     `json:"intent"`
-	CreatedBy      *string    `json:"created_by,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             string    `json:"id"`
+	Brand          BlogBrand `json:"brand"`
+	Topic          string    `json:"topic"`
+	TargetAudience string    `json:"target_audience"`
+	Intent         string    `json:"intent"`
+	CreatedBy      *string   `json:"created_by,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // BlogOutlineVersion represents a version of a blog outline
 type BlogOutlineVersion struct {
-	ID          string             `json:"id"`
-	DocumentID  string             `json:"document_id"`
-	Version     int                `json:"version"`
-	Structure   json.RawMessage   `json:"structure"` // {title, outline: [{heading, intent, subsections}]}
-	Status      BlogVersionStatus  `json:"status"`
-	CreatedAt   time.Time          `json:"created_at"`
+	ID         string            `json:"id"`
+	DocumentID string            `json:"document_id"`
+	Version    int               `json:"version"`
+	Structure  json.RawMessage   `json:"structure"` // {title, outline: [{heading, intent, subsections}]}
+	Status     BlogVersionStatus `json:"status"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 // BlogDraftVersion represents a version of a blog draft
 type BlogDraftVersion struct {
-	ID                   string             `json:"id"`
-	DocumentID           string             `json:"document_id"`
-	OutlineVersionID     *string            `json:"outline_version_id,omitempty"`
-	Version              int                `json:"version"`
-	Content              string             `json:"content"`
-	MetaDescription      *string            `json:"meta_description,omitempty"`
-	WordCount            *int               `json:"word_count,omitempty"`
-	EstimatedReadingTime *int               `json:"estimated_reading_time,omitempty"`
-	Status               BlogVersionStatus   `json:"status"`
-	CreatedAt            time.Time           `json:"created_at"`
+	ID                   string            `json:"id"`
+	DocumentID           string            `json:"document_id"`
+	OutlineVersionID     *string           `json:"outline_version_id,omitempty"`
+	Version              int               `json:"version"`
+	Content              string            `json:"content"`
+	MetaDescription      *string           `json:"meta_description,omitempty"`
+	WordCount            *int              `json:"word_count,omitempty"`
+	EstimatedReadingTime *int              `json:"estimated_reading_time,omitempty"`
+	Status               BlogVersionStatus `json:"status"`
+	CreatedAt            time.Time         `json:"created_at"`
 }
 
 // BlogFeedback represents feedback on an outline or draft
@@ -98,7 +98,7 @@ func NewBlogDocumentRepository() *BlogDocumentRepository {
 // Create creates a new blog document
 func (r *BlogDocumentRepository) Create(brand BlogBrand, topic, targetAudience, intent, createdBy string) (*BlogDocument, error) {
 	id := uuid.New().String()
-	
+
 	var createdByPtr *string
 	if createdBy != "" {
 		createdByPtr = &createdBy

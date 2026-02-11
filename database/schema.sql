@@ -87,10 +87,101 @@ CREATE TABLE IF NOT EXISTS integrations (
 CREATE INDEX IF NOT EXISTS idx_integrations_type ON integrations(type);
 CREATE INDEX IF NOT EXISTS idx_integrations_status ON integrations(status);
 
+-- Workflows table (orchestration definitions)
+CREATE TABLE IF NOT EXISTS workflows (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('active', 'paused', 'draft')),
+  trigger_type VARCHAR(50) NOT NULL,
+  trigger_config JSONB NOT NULL DEFAULT '{}',
+  steps JSONB NOT NULL DEFAULT '[]',
+  owner_team VARCHAR(100),
+  created_by VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status);
+CREATE INDEX IF NOT EXISTS idx_workflows_trigger_type ON workflows(trigger_type);
+CREATE INDEX IF NOT EXISTS idx_workflows_owner_team ON workflows(owner_team);
+
+-- Workflow cases table (long-lived ticket/thread state)
+CREATE TABLE IF NOT EXISTS workflow_cases (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workflow_id UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  provider VARCHAR(50) NOT NULL, -- e.g. freshdesk
+  external_ref_id TEXT NOT NULL, -- e.g. ticket_id
+  status VARCHAR(20), -- open|pending|resolved|closed (optional)
+  latest_state JSONB NOT NULL DEFAULT '{}', -- last_seen_conversation_id, ticket_summary, etc.
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_cases_workflow_provider_ref
+  ON workflow_cases(workflow_id, provider, external_ref_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_cases_workflow_id ON workflow_cases(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_cases_updated_at ON workflow_cases(updated_at DESC);
+
+-- Workflow runs table (executions)
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workflow_id UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  status VARCHAR(20) NOT NULL DEFAULT 'running'
+    CHECK (status IN ('running', 'completed', 'failed')),
+  case_id UUID REFERENCES workflow_cases(id) ON DELETE SET NULL,
+  provider_event_id TEXT,
+  idempotency_key TEXT,
+  trigger_payload JSONB NOT NULL DEFAULT '{}',
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  completed_at TIMESTAMP WITH TIME ZONE,
+  error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_workflow_id ON workflow_runs(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_case_id ON workflow_runs(case_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_started_at ON workflow_runs(started_at DESC);
+-- Prevent duplicate runs per workflow for retrying webhooks
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_runs_workflow_id_idempotency_key
+  ON workflow_runs(workflow_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+-- Preferred idempotency: provider event id (if available)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_runs_workflow_id_provider_event_id
+  ON workflow_runs(workflow_id, provider_event_id)
+  WHERE provider_event_id IS NOT NULL;
+
+-- Backward-compatible alterations (safe to run on existing DB)
+ALTER TABLE IF EXISTS workflow_runs
+  ADD COLUMN IF NOT EXISTS case_id UUID REFERENCES workflow_cases(id) ON DELETE SET NULL;
+ALTER TABLE IF EXISTS workflow_runs
+  ADD COLUMN IF NOT EXISTS provider_event_id TEXT;
+
+-- Workflow step runs table (per-step execution record)
+CREATE TABLE IF NOT EXISTS workflow_step_runs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  workflow_run_id UUID NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  step_index INTEGER NOT NULL,
+  step_type VARCHAR(50) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'running'
+    CHECK (status IN ('running', 'completed', 'failed', 'skipped')),
+  input JSONB NOT NULL DEFAULT '{}',
+  output JSONB NOT NULL DEFAULT '{}',
+  task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+  error TEXT,
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  completed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_step_runs_workflow_run_id ON workflow_step_runs(workflow_run_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_step_runs_run_step ON workflow_step_runs(workflow_run_id, step_index);
+
 -- Seed initial agents
 INSERT INTO agents (type, name, description, status, config) VALUES
   ('sales', 'Sales Agent', 'Automates lead qualification, email outreach, and meeting scheduling.', 'active', '{}'),
   ('support', 'Support Agent', 'Handles customer inquiries, ticket triage, and knowledge base queries.', 'active', '{}'),
+  ('support_ticket_triage', 'Support Ticket Triage Agent', 'Classifies support tickets, identifies missing fields, and drafts replies for human review.', 'active', '{}'),
   ('hr', 'HR Agent', 'Screens candidates, answers employee questions, and manages HR workflows.', 'active', '{}'),
   ('market_research', 'Market Research Agent', 'Analyzes market trends, competitor data, and industry reports.', 'active', '{}'),
   ('site_scan', 'Site Scan Agent', 'Runs website scans, compliance checks, and KYC site scans.', 'active', '{}'),
@@ -123,6 +214,20 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS update_agents_updated_at ON agents;
 CREATE TRIGGER update_agents_updated_at
   BEFORE UPDATE ON agents
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- Trigger for workflows table
+DROP TRIGGER IF EXISTS update_workflows_updated_at ON workflows;
+CREATE TRIGGER update_workflows_updated_at
+  BEFORE UPDATE ON workflows
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- Trigger for workflow_cases table
+DROP TRIGGER IF EXISTS update_workflow_cases_updated_at ON workflow_cases;
+CREATE TRIGGER update_workflow_cases_updated_at
+  BEFORE UPDATE ON workflow_cases
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 

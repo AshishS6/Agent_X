@@ -72,6 +72,17 @@ class ModelRegistry:
         
         # Qwen models
         self._register_model(ModelInfo(
+            id="ollama:qwen2.5:1.5b-instruct",
+            provider=Provider.OLLAMA,
+            name="Qwen 2.5 1.5B Instruct",
+            context_limit=32768,
+            input_price_per_1k=0.0,  # Free (local)
+            output_price_per_1k=0.0,
+            recommended_intents=[Intent.CHAT, Intent.CODE, Intent.ANALYSIS],
+            is_local=True
+        ))
+
+        self._register_model(ModelInfo(
             id="ollama:qwen2.5:7b-instruct",
             provider=Provider.OLLAMA,
             name="Qwen 2.5 7B Instruct",
@@ -124,6 +135,16 @@ class ModelRegistry:
             input_price_per_1k=0.0,
             output_price_per_1k=0.0,
             recommended_intents=[Intent.CHAT, Intent.CODE, Intent.ANALYSIS],
+            is_local=True
+        ))
+        self._register_model(ModelInfo(
+            id="ollama:llama3.2:8b",
+            provider=Provider.OLLAMA,
+            name="Llama 3.2 8B",
+            context_limit=128000,
+            input_price_per_1k=0.0,
+            output_price_per_1k=0.0,
+            recommended_intents=[Intent.CHAT, Intent.CODE, Intent.ANALYSIS, Intent.LONG_FORM],
             is_local=True
         ))
         

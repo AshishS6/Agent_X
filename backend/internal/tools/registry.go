@@ -54,6 +54,16 @@ func InitRegistry(marketResearchTimeout, salesAgentTimeout, blogAgentTimeout tim
 			ConcurrencyLimit: 5,
 			AgentType:        "sales",
 		},
+		"support_ticket_triage": {
+			Name:             "Support Ticket Triage Agent",
+			Description:      "Classifies support tickets, identifies missing fields, and drafts replies for human review",
+			Command:          "python3",
+			Args:             []string{"backend/agents/support_ticket_triage_agent/cli.py"},
+			Timeout:          salesAgentTimeout,
+			WorkingDir:       ".",
+			ConcurrencyLimit: 5,
+			AgentType:        "support_ticket_triage",
+		},
 		"blog": {
 			Name:             "Blog Agent",
 			Description:      "Generates structured blog outlines and drafts for marketing teams",

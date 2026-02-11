@@ -217,7 +217,7 @@ const mapIntegrationFromApi = (data: any): Integration => ({
 export const IntegrationService = {
     getAll: async (): Promise<Integration[]> => {
         const response = await api.get<{ data: any[] }>('/integrations');
-        return response.data.data.map(mapIntegrationFromApi);
+        return (response.data.data || []).map(mapIntegrationFromApi);
     },
 
     connect: async (data: Partial<Integration>): Promise<Integration> => {
@@ -230,9 +230,169 @@ export const IntegrationService = {
     },
 
     update: async (id: string, data: Partial<Integration>): Promise<Integration> => {
+        // Accept both camelCase and snake_case on backend; keep frontend camelCase
         const response = await api.put<{ data: any }>(`/integrations/${id}`, data);
         return mapIntegrationFromApi(response.data.data);
     }
 };
 
 export default api;
+
+// -------------------------
+// Workflows (MVP)
+// -------------------------
+
+export interface Workflow {
+    id: string;
+    name: string;
+    description?: string | null;
+    status: 'active' | 'paused' | 'draft';
+    triggerType: string;
+    triggerConfig: Record<string, any>;
+    steps: any[];
+    ownerTeam?: string | null;
+    createdBy?: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface WorkflowRun {
+    id: string;
+    workflowId: string;
+    status: 'running' | 'completed' | 'failed';
+    caseId?: string | null;
+    providerEventId?: string | null;
+    idempotencyKey?: string | null;
+    triggerPayload: Record<string, any>;
+    startedAt: string;
+    completedAt?: string | null;
+    error?: string | null;
+}
+
+export interface WorkflowCase {
+    id: string;
+    workflowId: string;
+    provider: string;
+    externalRefId: string;
+    status?: string | null;
+    latestState: Record<string, any>;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export interface WorkflowStepRun {
+    id: string;
+    workflowRunId: string;
+    stepIndex: number;
+    stepType: string;
+    status: 'running' | 'completed' | 'failed' | 'skipped';
+    input: Record<string, any>;
+    output: Record<string, any>;
+    taskId?: string | null;
+    error?: string | null;
+    startedAt: string;
+    completedAt?: string | null;
+}
+
+const mapWorkflowFromApi = (data: any): Workflow => ({
+    id: data.id,
+    name: data.name,
+    description: data.description ?? null,
+    status: data.status,
+    triggerType: data.trigger_type,
+    triggerConfig: data.trigger_config || {},
+    steps: data.steps || [],
+    ownerTeam: data.owner_team ?? null,
+    createdBy: data.created_by ?? null,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+});
+
+const mapWorkflowRunFromApi = (data: any): WorkflowRun => ({
+    id: data.id,
+    workflowId: data.workflow_id,
+    status: data.status,
+    caseId: data.case_id ?? null,
+    providerEventId: data.provider_event_id ?? null,
+    idempotencyKey: data.idempotency_key ?? null,
+    triggerPayload: data.trigger_payload || {},
+    startedAt: data.started_at,
+    completedAt: data.completed_at ?? null,
+    error: data.error ?? null,
+});
+
+const mapWorkflowCaseFromApi = (data: any): WorkflowCase => ({
+    id: data.id,
+    workflowId: data.workflow_id,
+    provider: data.provider,
+    externalRefId: data.external_ref_id,
+    status: data.status ?? null,
+    latestState: data.latest_state || {},
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+});
+
+const mapWorkflowStepRunFromApi = (data: any): WorkflowStepRun => ({
+    id: data.id,
+    workflowRunId: data.workflow_run_id,
+    stepIndex: data.step_index,
+    stepType: data.step_type,
+    status: data.status,
+    input: data.input || {},
+    output: data.output || {},
+    taskId: data.task_id ?? null,
+    error: data.error ?? null,
+    startedAt: data.started_at,
+    completedAt: data.completed_at ?? null,
+});
+
+export const WorkflowService = {
+    getAll: async (): Promise<Workflow[]> => {
+        const response = await api.get<{ data: any[] }>('/workflows');
+        return (response.data.data || []).map(mapWorkflowFromApi);
+    },
+    create: async (data: Partial<Workflow> & { name: string; triggerType: string; steps: any[] }): Promise<Workflow> => {
+        const response = await api.post<{ data: any }>('/workflows', {
+            name: data.name,
+            description: data.description,
+            status: data.status || 'draft',
+            trigger_type: data.triggerType,
+            trigger_config: data.triggerConfig || {},
+            steps: data.steps || [],
+            owner_team: data.ownerTeam,
+            created_by: data.createdBy,
+        });
+        return mapWorkflowFromApi(response.data.data);
+    },
+    update: async (id: string, updates: any): Promise<Workflow> => {
+        const response = await api.put<{ data: any }>(`/workflows/${id}`, updates);
+        return mapWorkflowFromApi(response.data.data);
+    },
+    pause: async (id: string): Promise<Workflow> => {
+        const response = await api.post<{ data: any }>(`/workflows/${id}/pause`);
+        return mapWorkflowFromApi(response.data.data);
+    },
+    activate: async (id: string): Promise<Workflow> => {
+        const response = await api.post<{ data: any }>(`/workflows/${id}/activate`);
+        return mapWorkflowFromApi(response.data.data);
+    },
+    getRuns: async (workflowId: string, params?: { limit?: number; offset?: number }) => {
+        const response = await api.get<{ data: any[]; total: number }>(`/workflows/${workflowId}/runs`, { params });
+        return { runs: (response.data.data || []).map(mapWorkflowRunFromApi), total: response.data.total || 0 };
+    },
+    getCases: async (workflowId: string, params?: { limit?: number; offset?: number }) => {
+        const response = await api.get<{ data: any[]; total: number }>(`/workflows/${workflowId}/cases`, { params });
+        return { cases: (response.data.data || []).map(mapWorkflowCaseFromApi), total: response.data.total || 0 };
+    },
+    getRunsForCase: async (caseId: string, params?: { limit?: number; offset?: number }) => {
+        const response = await api.get<{ data: any[]; total: number }>(`/workflow-cases/${caseId}/runs`, { params });
+        return { runs: (response.data.data || []).map(mapWorkflowRunFromApi), total: response.data.total || 0 };
+    },
+    getRunById: async (runId: string): Promise<{ run: WorkflowRun; steps: WorkflowStepRun[] }> => {
+        const response = await api.get<{ data: { run: any; steps: any[] } }>(`/workflow-runs/${runId}`);
+        return {
+            run: mapWorkflowRunFromApi(response.data.data.run),
+            steps: (response.data.data.steps || []).map(mapWorkflowStepRunFromApi),
+        };
+    },
+};

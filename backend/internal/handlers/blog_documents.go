@@ -15,7 +15,7 @@ import (
 
 // BlogDocumentsHandler handles blog document-related HTTP requests
 type BlogDocumentsHandler struct {
-	docRepo  *models.BlogDocumentRepository
+	docRepo   *models.BlogDocumentRepository
 	agentRepo *models.AgentRepository
 	taskRepo  *models.TaskRepository
 	executor  *tools.Executor
@@ -210,13 +210,13 @@ func (h *BlogDocumentsHandler) GenerateOutline(c *gin.Context) {
 
 	// Create task for outline generation
 	input := map[string]any{
-		"document_id": documentID,
-		"brand":        string(doc.Brand),
-		"topic":        doc.Topic,
+		"document_id":     documentID,
+		"brand":           string(doc.Brand),
+		"topic":           doc.Topic,
 		"target_audience": doc.TargetAudience,
-		"intent":       doc.Intent,
-		"version":      nextVersion,
-		"use_rag":      req.UseRAG,
+		"intent":          doc.Intent,
+		"version":         nextVersion,
+		"use_rag":         req.UseRAG,
 	}
 
 	task, err := h.taskRepo.Create(agent.ID, "generate_outline_v2", input, "medium", "")
@@ -413,9 +413,9 @@ func (h *BlogDocumentsHandler) AddFeedback(c *gin.Context) {
 
 // GenerateDraftRequest is the request body for generating a draft
 type GenerateDraftRequest struct {
-	Tone    string `json:"tone"`
-	Length  string `json:"length"`
-	UseRAG  bool   `json:"use_rag"`
+	Tone   string `json:"tone"`
+	Length string `json:"length"`
+	UseRAG bool   `json:"use_rag"`
 }
 
 // GenerateDraft generates a draft from an approved outline
@@ -484,18 +484,18 @@ func (h *BlogDocumentsHandler) GenerateDraft(c *gin.Context) {
 
 	// Create task for draft generation
 	input := map[string]any{
-		"document_id":      documentID,
+		"document_id":        documentID,
 		"outline_version_id": approvedOutline.ID,
-		"brand":            string(doc.Brand),
-		"topic":            doc.Topic,
-		"target_audience":  doc.TargetAudience,
-		"intent":           doc.Intent,
-		"outline_structure": json.RawMessage(approvedOutline.Structure),
-		"tone":            req.Tone,
-		"length":           req.Length,
-		"version":          nextVersion,
-		"use_rag":          req.UseRAG,
-		"feedback":        feedback,
+		"brand":              string(doc.Brand),
+		"topic":              doc.Topic,
+		"target_audience":    doc.TargetAudience,
+		"intent":             doc.Intent,
+		"outline_structure":  json.RawMessage(approvedOutline.Structure),
+		"tone":               req.Tone,
+		"length":             req.Length,
+		"version":            nextVersion,
+		"use_rag":            req.UseRAG,
+		"feedback":           feedback,
 	}
 
 	task, err := h.taskRepo.Create(agent.ID, "generate_draft_v2", input, "medium", "")
