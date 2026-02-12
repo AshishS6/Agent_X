@@ -185,6 +185,7 @@ func main() {
 			// Cases
 			workflows.GET("/:id/cases", workflowsHandler.GetCases)
 		}
+		api.GET("/workflow-runs", workflowsHandler.GetAllRuns)
 		api.GET("/workflow-runs/:runId", workflowsHandler.GetRunByID)
 		api.GET("/workflow-cases/:caseId", workflowsHandler.GetCaseByID)
 		api.GET("/workflow-cases/:caseId/runs", workflowsHandler.GetRunsForCase)

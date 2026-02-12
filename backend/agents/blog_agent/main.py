@@ -649,7 +649,7 @@ Sections may omit "subsections" if not needed. Return only valid JSON, no other 
             self.logger.error(f"Response was: {response_text}")
             raise ValueError(f"Failed to parse outline response as JSON: {str(e)}")
         
-        return {
+        result = {
             "action": "generate_outline",
             "response": {
                 "title": outline_data.get("title", ""),
@@ -660,6 +660,13 @@ Sections may omit "subsections" if not needed. Return only valid JSON, no other 
                 "intent": intent
             }
         }
+        
+        # Preserve LLM usage
+        if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
+            if "llm_usage" in response.response_metadata:
+                result["llm_usage"] = response.response_metadata["llm_usage"]
+                
+        return result
     
     def _repair_outline_json(self, raw: str) -> str:
         """Fix common LLM JSON mistakes before parsing (e.g. missing commas)."""
@@ -763,7 +770,7 @@ Return only valid JSON, no additional text."""
         word_count = post_data.get("word_count", 0)
         reading_time = max(1, round(word_count / 200))
         
-        return {
+        result = {
             "action": "generate_post_from_outline",
             "response": {
                 "title": post_data.get("title", ""),
@@ -776,6 +783,13 @@ Return only valid JSON, no additional text."""
                 "length": length
             }
         }
+        
+        # Preserve LLM usage
+        if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
+            if "llm_usage" in response.response_metadata:
+                result["llm_usage"] = response.response_metadata["llm_usage"]
+                
+        return result
     
     def _format_outline_for_prompt(self, outline: Dict[str, Any]) -> str:
         """Format outline dict for prompt"""
@@ -846,7 +860,7 @@ Return only valid JSON, no additional text."""
             self.logger.error(f"Failed to save outline to database: {e}")
             # Continue anyway - return the result
         
-        return {
+        result = {
             "action": "generate_outline_v2",
             "response": {
                 "document_id": document_id,
@@ -854,6 +868,12 @@ Return only valid JSON, no additional text."""
                 "structure": structure
             }
         }
+        
+        # Propagate LLM usage from underlying call
+        if "llm_usage" in outline_result:
+            result["llm_usage"] = outline_result["llm_usage"]
+            
+        return result
     
     def _get_rag_context(self, brand: str, topic: str, target_audience: str, intent: str, feedback: list = None) -> str:
         """Get RAG context from knowledge base (synchronous wrapper)"""
@@ -1204,7 +1224,7 @@ Return only valid JSON, no additional text."""
             self.logger.error(f"Failed to save draft to database: {e}")
             # Continue anyway - return the result
         
-        return {
+        result = {
             "action": "generate_draft_v2",
             "response": {
                 "document_id": document_id,
@@ -1219,6 +1239,13 @@ Return only valid JSON, no additional text."""
                 "length": length
             }
         }
+        
+        # Preserve LLM usage
+        if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
+            if "llm_usage" in response.response_metadata:
+                result["llm_usage"] = response.response_metadata["llm_usage"]
+                
+        return result
 
 
 # Factory function to create blog agent instance

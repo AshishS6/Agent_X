@@ -80,7 +80,7 @@ Respond with structured, actionable output."""
             # Parse email from response (simple extraction for now)
             email_content = result.get("response", "")
             
-            return {
+            output = {
                 "action": "generate_email",
                 "email": {
                     "subject": self._extract_subject(email_content),
@@ -93,12 +93,18 @@ Respond with structured, actionable output."""
                 },
                 "completed_at": result.get("completed_at")
             }
+            
+            # Preserve LLM usage
+            if "llm_usage" in result:
+                output["llm_usage"] = result["llm_usage"]
+                
+            return output
         
         # For lead qualification tasks
         elif task.action == "qualify_lead":
             result = super()._run_agent_loop(system_prompt, user_prompt, task)
             
-            return {
+            output = {
                 "action": "qualify_lead",
                 "qualification": {
                     "score": self._extract_score(result.get("response", "")),
@@ -107,6 +113,12 @@ Respond with structured, actionable output."""
                 },
                 "completed_at": result.get("completed_at")
             }
+            
+            # Preserve LLM usage
+            if "llm_usage" in result:
+                output["llm_usage"] = result["llm_usage"]
+                
+            return output
         
         # Default handling for other actions
         else:

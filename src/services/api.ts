@@ -142,7 +142,7 @@ export const TaskService = {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        
+
         // Extract filename from Content-Disposition header if available
         const contentDisposition = response.headers['content-disposition'];
         let filename = `report_${taskId}.${format === 'markdown' ? 'md' : format}`;
@@ -161,7 +161,7 @@ export const TaskService = {
                 }
             }
         }
-        
+
         link.setAttribute('download', filename);
         document.body.appendChild(link);
         link.click();
@@ -185,11 +185,14 @@ export const MonitoringService = {
         };
     },
 
-    getActivity: async (limit: number = 20): Promise<Task[]> => {
-        const response = await api.get<{ data: any[] }>('/monitoring/activity', {
-            params: { limit },
+    getActivity: async (limit: number = 20, offset: number = 0): Promise<{ tasks: Task[], total: number }> => {
+        const response = await api.get<{ data: any[], total: number }>('/monitoring/activity', {
+            params: { limit, offset },
         });
-        return response.data.data.map(mapTaskFromApi);
+        return {
+            tasks: response.data.data.map(mapTaskFromApi),
+            total: response.data.total
+        };
     },
 };
 
@@ -386,6 +389,10 @@ export const WorkflowService = {
     },
     getRunsForCase: async (caseId: string, params?: { limit?: number; offset?: number }) => {
         const response = await api.get<{ data: any[]; total: number }>(`/workflow-cases/${caseId}/runs`, { params });
+        return { runs: (response.data.data || []).map(mapWorkflowRunFromApi), total: response.data.total || 0 };
+    },
+    getAllRuns: async (params?: { limit?: number; offset?: number }) => {
+        const response = await api.get<{ data: any[]; total: number }>('/workflow-runs', { params });
         return { runs: (response.data.data || []).map(mapWorkflowRunFromApi), total: response.data.total || 0 };
     },
     getRunById: async (runId: string): Promise<{ run: WorkflowRun; steps: WorkflowStepRun[] }> => {

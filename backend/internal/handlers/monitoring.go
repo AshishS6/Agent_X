@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,14 +141,23 @@ func (h *MonitoringHandler) Metrics(c *gin.Context) {
 // GET /api/monitoring/activity
 func (h *MonitoringHandler) Activity(c *gin.Context) {
 	limit := 20
+	offset := 0
+
 	if l := c.Query("limit"); l != "" {
-		if _, err := c.GetQuery("limit"); err {
-			limit = 20
+		if val, err := strconv.Atoi(l); err == nil && val > 0 {
+			limit = val
 		}
 	}
 
-	tasks, _, err := h.taskRepo.FindAll(map[string]any{
-		"limit": limit,
+	if o := c.Query("offset"); o != "" {
+		if val, err := strconv.Atoi(o); err == nil && val >= 0 {
+			offset = val
+		}
+	}
+
+	tasks, total, err := h.taskRepo.FindAll(map[string]any{
+		"limit":  limit,
+		"offset": offset,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -160,6 +170,7 @@ func (h *MonitoringHandler) Activity(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    tasks,
+		"total":   total,
 	})
 }
 

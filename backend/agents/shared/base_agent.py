@@ -258,11 +258,18 @@ class BaseAgent(ABC):
         })
         
         # Parse and return result
-        return {
+        result = {
             "response": response.content,
             "action": task.action,
             "completed_at": datetime.utcnow().isoformat()
         }
+        
+        # Include LLM usage if available
+        if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
+            if "llm_usage" in response.response_metadata:
+                result["llm_usage"] = response.response_metadata["llm_usage"]
+        
+        return result
     
     def reset_conversation(self):
         """Clear conversation history"""

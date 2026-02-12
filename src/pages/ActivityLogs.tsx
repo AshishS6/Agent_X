@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Search,
     Filter,
@@ -17,7 +17,8 @@ import {
     Activity,
     GitBranch,
     ChevronDown,
-    ChevronUp
+    ChevronUp,
+    Zap
 } from 'lucide-react';
 import clsx from 'clsx';
 import { MonitoringService, Task, Workflow, WorkflowRun, WorkflowService } from '../services/api';
@@ -54,6 +55,14 @@ interface ActivityLog {
         input: Record<string, any>;
         output?: Record<string, any>;
         raw: Record<string, any>;
+        llmUsage?: {
+            model_id: string;
+            provider: string;
+            steps: number;
+            total_tokens: number;
+            cost: number;
+            latency: number;
+        };
     };
 }
 
@@ -167,52 +176,70 @@ const ActivityLogs = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(0);
+    const [totalPages, setTotalPages] = useState(0);
+    const PAGE_SIZE = 20;
+
+    // Use ref to track selected log for interval updates without stale closures
+    const selectedLogRef = useRef<ActivityLog | null>(null);
+
+    // Keep ref in sync with state
+    useEffect(() => {
+        selectedLogRef.current = selectedLog;
+    }, [selectedLog]);
 
     useEffect(() => {
-        fetchLogs();
-        // Poll for updates every 10 seconds
-        const interval = setInterval(fetchLogs, 10000);
+        fetchLogs(false);
+        const interval = setInterval(() => fetchLogs(true), 5000);
         return () => clearInterval(interval);
-    }, []);
+    }, [page]);
 
     useEffect(() => {
         setShowTechnicalDetails(false);
     }, [selectedLog?.id]);
 
-    const fetchLogs = async () => {
+    const fetchLogs = async (isBackground = false) => {
         try {
-            const [tasks, workflows] = await Promise.all([
-                MonitoringService.getActivity(50),
+            if (!isBackground) setLoading(true);
+            const offset = page * PAGE_SIZE;
+
+            const [taskData, runData, workflows] = await Promise.all([
+                MonitoringService.getActivity(PAGE_SIZE, offset),
+                WorkflowService.getAllRuns({ limit: PAGE_SIZE, offset }),
                 WorkflowService.getAll()
             ]);
 
-            const workflowRunsSettled = await Promise.allSettled(
-                workflows.map(async (workflow) => {
-                    const { runs } = await WorkflowService.getRuns(workflow.id, { limit: 10, offset: 0 });
-                    return runs.map((run) => ({ run, workflow }));
-                })
-            );
+            const tasks = taskData.tasks;
+            const totalTasks = taskData.total;
+            const totalRuns = runData.total;
 
-            const workflowRuns = workflowRunsSettled.flatMap((result) =>
-                result.status === 'fulfilled' ? result.value : []
-            );
+            const maxItems = Math.max(totalTasks, totalRuns);
+            setTotalPages(Math.ceil(maxItems / PAGE_SIZE) || 1);
+
+            const workflowMap = new Map(workflows.map(w => [w.id, w]));
+
+            const workflowRuns = runData.runs
+                .map(run => {
+                    const workflow = workflowMap.get(run.workflowId);
+                    return workflow ? { run, workflow } : null;
+                })
+                .filter((item): item is { run: WorkflowRun, workflow: Workflow } => item !== null);
 
             const mappedLogs = [
                 ...tasks.map(mapTaskToLog),
                 ...workflowRuns.map(({ run, workflow }) => mapWorkflowRunToLog(run, workflow))
-            ]
-                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                .slice(0, 100);
+            ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
             setLogs(mappedLogs);
-            setSelectedLog((current) => {
-                if (!current) return mappedLogs[0] ?? null;
-                return mappedLogs.find((log) => log.entryId === current.entryId) ?? mappedLogs[0] ?? null;
-            });
-            setLoading(false);
+
+            // Only auto-select if nothing is currently selected (checking ref for up-to-date value)
+            if (!selectedLogRef.current && mappedLogs.length > 0) {
+                setSelectedLog(mappedLogs[0]);
+            }
+            if (!isBackground) setLoading(false);
         } catch (err) {
             console.error('Failed to fetch activity logs:', err);
-            setLoading(false);
+            if (!isBackground) setLoading(false);
         }
     };
 
@@ -248,7 +275,15 @@ const ActivityLogs = () => {
             details: {
                 input: task.input || {},
                 output: task.output,
-                raw: task as unknown as Record<string, any>
+                raw: task as unknown as Record<string, any>,
+                llmUsage: task.output?.llm_usage ? {
+                    model_id: task.output.llm_usage.model_id || 'unknown',
+                    provider: task.output.llm_usage.provider || 'unknown',
+                    steps: 1, // basic implementation for single step
+                    total_tokens: (task.output.llm_usage.input_tokens || 0) + (task.output.llm_usage.output_tokens || 0),
+                    cost: task.output.llm_usage.estimated_cost_usd || 0,
+                    latency: task.output.llm_usage.latency_ms || 0
+                } : undefined
             }
         };
     };
@@ -284,7 +319,14 @@ const ActivityLogs = () => {
                 { label: 'Run ID', value: run.id.slice(0, 8) },
                 { label: 'Trigger', value: humanize(workflow.triggerType || 'workflow') },
                 { label: 'Case ID', value: run.caseId ? run.caseId.slice(0, 8) : '-' },
-                { label: 'Duration', value: formatDuration({ startedAt: run.startedAt, completedAt: run.completedAt, createdAt: run.startedAt }) }
+                {
+                    label: 'Duration',
+                    value: formatDuration({
+                        startedAt: run.startedAt,
+                        completedAt: run.completedAt || undefined,
+                        createdAt: run.startedAt
+                    })
+                }
             ],
             details: {
                 input: run.triggerPayload || {},
@@ -467,6 +509,27 @@ const ActivityLogs = () => {
                             />
                         )}
                     </div>
+
+                    {/* Pagination Controls */}
+                    <div className="flex justify-between items-center p-4 border-t border-gray-800 bg-gray-900/40">
+                        <button
+                            onClick={() => setPage(p => Math.max(0, p - 1))}
+                            disabled={page === 0 || loading}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 border border-gray-700 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Previous
+                        </button>
+                        <div className="text-xs text-gray-500 font-mono">
+                            Page {page + 1} of {totalPages}
+                        </div>
+                        <button
+                            onClick={() => setPage(p => p + 1)}
+                            disabled={page >= totalPages - 1 || loading}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 border border-gray-700 rounded-md hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Next
+                        </button>
+                    </div>
                 </div>
 
                 {/* Log Detail Drawer (Right 1/3) */}
@@ -529,6 +592,41 @@ const ActivityLogs = () => {
                                     ))}
                                 </div>
                             </div>
+
+                            {selectedLog.details.llmUsage && (
+                                <div>
+                                    <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                                        <Zap size={12} className="text-yellow-500" />
+                                        <span>LLM Metrics</span>
+                                    </h3>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="bg-gray-800/40 p-2.5 rounded-lg border border-gray-700/50">
+                                            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Model</div>
+                                            <div className="text-xs text-gray-200 font-mono truncate" title={selectedLog.details.llmUsage.model_id}>
+                                                {selectedLog.details.llmUsage.model_id.split(':').pop()}
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-800/40 p-2.5 rounded-lg border border-gray-700/50">
+                                            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Tokens</div>
+                                            <div className="text-xs text-gray-200 font-mono">
+                                                {selectedLog.details.llmUsage.total_tokens.toLocaleString()}
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-800/40 p-2.5 rounded-lg border border-gray-700/50">
+                                            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Cost</div>
+                                            <div className="text-xs text-gray-200 font-mono">
+                                                ${selectedLog.details.llmUsage.cost.toFixed(6)}
+                                            </div>
+                                        </div>
+                                        <div className="bg-gray-800/40 p-2.5 rounded-lg border border-gray-700/50">
+                                            <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Latency</div>
+                                            <div className="text-xs text-gray-200 font-mono">
+                                                {Math.round(selectedLog.details.llmUsage.latency)}ms
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             <div>
                                 <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Task Input</h3>

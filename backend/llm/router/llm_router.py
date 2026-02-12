@@ -34,13 +34,18 @@ from ..providers.ollama_client import OllamaClient
 logger = logging.getLogger(__name__)
 
 
-class _TrackedLangChainClient:
+from langchain_core.runnables import Runnable, RunnableConfig
+
+class _TrackedLangChainClient(Runnable):
     """
     Wrapper around a LangChain chat model that tracks usage on invoke().
 
     LangChain clients (ChatOllama, ChatOpenAI, etc.) are Pydantic models and
     reject arbitrary attribute assignment. We avoid monkey-patching by
     wrapping the client and delegating invoke + __getattr__.
+    
+    Inheriting from Runnable ensures that methods like .bind() wrap THIS object
+    instead of the underlying client, preserving the tracking behavior.
     """
 
     def __init__(
@@ -67,14 +72,26 @@ class _TrackedLangChainClient:
         self._fallback_reason = fallback_reason
         self._estimate_tokens = estimate_tokens_fn
 
-    def invoke(self, messages: List[BaseMessage], **kwargs):
+    def invoke(self, input: Union[str, List[BaseMessage]], config: Optional[RunnableConfig] = None, **kwargs):
         invoke_start = time.time()
         try:
-            response = self._client.invoke(messages, **kwargs)
+            # Handle input normalization if needed, but usually it's List[BaseMessage]
+            response = self._client.invoke(input, config=config, **kwargs)
+            
             latency_ms = (time.time() - invoke_start) * 1000
-            input_text = "\n".join([getattr(m, "content", str(m)) for m in messages])
+            
+            # Extract text for token estimation
+            input_text = ""
+            if isinstance(input, str):
+                input_text = input
+            elif isinstance(input, list):
+                input_text = "\n".join([getattr(m, "content", str(m)) for m in input])
+                
+            output_text = getattr(response, "content", str(response))
+            
             input_tokens = self._estimate_tokens(input_text)
-            output_tokens = self._estimate_tokens(getattr(response, "content", str(response)))
+            output_tokens = self._estimate_tokens(output_text)
+            
             self._tracker.record_usage(
                 caller=self._caller,
                 provider=self._provider.value,
@@ -87,6 +104,12 @@ class _TrackedLangChainClient:
                 fallback_used=self._fallback_used,
                 fallback_reason=self._fallback_reason,
             )
+            
+            # Inject usage into response metadata if possible
+            if hasattr(response, "response_metadata") and isinstance(response.response_metadata, dict):
+                usage_record = self._tracker.records[-1]  # Get the record we just added
+                response.response_metadata["llm_usage"] = usage_record.to_dict()
+                
             return response
         except Exception as e:
             latency_ms = (time.time() - invoke_start) * 1000

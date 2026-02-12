@@ -204,6 +204,32 @@ func (h *WorkflowsHandler) GetRuns(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": runs, "total": total})
 }
 
+// GetAllRuns lists all workflow runs
+// GET /api/workflow-runs?limit=&offset=
+func (h *WorkflowsHandler) GetAllRuns(c *gin.Context) {
+	limit := 20
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+
+	runs, total, err := h.runRepo.FindAll(limit, offset)
+	if err != nil {
+		log.Printf("[WorkflowsHandler] Error fetching all runs: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": runs, "total": total})
+}
+
 // GetRunByID returns a run + its step runs
 // GET /api/workflow-runs/:runId
 func (h *WorkflowsHandler) GetRunByID(c *gin.Context) {

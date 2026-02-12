@@ -584,7 +584,7 @@ Thought:{agent_scratchpad}"""
         agent_executor = AgentExecutor(
             agent=agent,
             tools=self.tools,
-            verbose=True,
+            verbose=False,
             handle_parsing_errors=handle_parsing_error,
             max_iterations=10,  # Prevent infinite loops
             max_execution_time=300,  # 5 minute timeout
@@ -596,6 +596,10 @@ Thought:{agent_scratchpad}"""
             # Combine system prompt and user prompt for the input
             full_input = f"{system_prompt}\n\nTask: {user_prompt}"
             
+            # Capture starting state of usage tracker
+            tracker = self.router.tracker
+            start_record_count = len(tracker.records)
+            
             result = agent_executor.invoke({"input": full_input})
             response_text = result.get("output", "")
             
@@ -606,16 +610,44 @@ Thought:{agent_scratchpad}"""
                 if not response_text:
                      response_text = "Task executed but no final summary was generated."
             
+            # Aggregate usage from new records
+            new_records = tracker.records[start_record_count:]
+            agent_records = [r for r in new_records if r.caller == self.config.agent_type]
+            
+            llm_usage = {}
+            if agent_records:
+                total_input = sum(r.input_tokens for r in agent_records)
+                total_output = sum(r.output_tokens for r in agent_records)
+                total_cost = sum(r.estimated_cost_usd for r in agent_records)
+                
+                # Use the last record for model/provider info
+                last_record = agent_records[-1]
+                
+                llm_usage = {
+                    "provider": last_record.provider,
+                    "model_id": last_record.model_id,
+                    "input_tokens": total_input,
+                    "output_tokens": total_output,
+                    "total_tokens": total_input + total_output,
+                    "estimated_cost_usd": total_cost,
+                    "latency_ms": sum(r.latency_ms for r in agent_records)
+                }
+            
         except Exception as e:
             # Agent execution failed - this will be caught by base class and returned as failed status
             self.logger.error(f"Agent execution failed: {e}", exc_info=True)
             raise  # Re-raise to let base class handle it properly
 
-        return {
+        output = {
             "response": response_text,
             "action": task.action,
             "completed_at": "now" # In real code use datetime
         }
+        
+        if llm_usage:
+            output["llm_usage"] = llm_usage
+            
+        return output
     
     def _get_system_prompt(self) -> str:
         """Market research agent system prompt"""

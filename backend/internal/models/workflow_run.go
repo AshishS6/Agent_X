@@ -168,6 +168,78 @@ func (r *WorkflowRunRepository) FindByWorkflowID(workflowID string, limit, offse
 	return runs, total, nil
 }
 
+func (r *WorkflowRunRepository) FindAll(limit, offset int) ([]WorkflowRun, int, error) {
+	countQuery := `SELECT COUNT(*)::int FROM workflow_runs`
+	var total int
+	if err := database.DB.QueryRow(countQuery).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := `
+		SELECT id, workflow_id, status, case_id, provider_event_id, idempotency_key, trigger_payload, started_at, completed_at, error
+		FROM workflow_runs
+		ORDER BY started_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := database.DB.Query(query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	runs := []WorkflowRun{}
+	for rows.Next() {
+		run := WorkflowRun{}
+		var caseID sql.NullString
+		var providerEventID sql.NullString
+		var idk sql.NullString
+		var payload sql.NullString
+		var completedAt sql.NullTime
+		var errMsg sql.NullString
+
+		if err := rows.Scan(
+			&run.ID,
+			&run.WorkflowID,
+			&run.Status,
+			&caseID,
+			&providerEventID,
+			&idk,
+			&payload,
+			&run.StartedAt,
+			&completedAt,
+			&errMsg,
+		); err != nil {
+			return nil, 0, err
+		}
+
+		if caseID.Valid {
+			run.CaseID = &caseID.String
+		}
+		if providerEventID.Valid {
+			run.ProviderEventID = &providerEventID.String
+		}
+		if idk.Valid {
+			run.IdempotencyKey = &idk.String
+		}
+		if payload.Valid {
+			run.TriggerPayload = json.RawMessage(payload.String)
+		} else {
+			run.TriggerPayload = json.RawMessage("{}")
+		}
+		if completedAt.Valid {
+			run.CompletedAt = &completedAt.Time
+		}
+		if errMsg.Valid {
+			run.Error = &errMsg.String
+		}
+
+		runs = append(runs, run)
+	}
+
+	return runs, total, nil
+}
+
 func (r *WorkflowRunRepository) FindByIdempotencyKey(workflowID string, idempotencyKey string) (*WorkflowRun, error) {
 	query := `
 		SELECT id, workflow_id, status, case_id, provider_event_id, idempotency_key, trigger_payload, started_at, completed_at, error
