@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -34,25 +34,7 @@ type ChatRequest struct {
 	Assistant     string `json:"assistant" binding:"required"`
 }
 
-// ChatResponse is the response from assistant chat
-// This contract is LOCKED - do not change without frontend coordination
-type ChatResponse struct {
-	Assistant string       `json:"assistant"` // Required: assistant name
-	Answer    string       `json:"answer"`    // Required: markdown-formatted answer
-	Citations []string     `json:"citations"` // Required: array of public URLs (empty if none)
-	Metadata  ChatMetadata `json:"metadata"`  // Required: structured metadata
-}
-
-// ChatMetadata contains structured metadata about the response
-type ChatMetadata struct {
-	Model     string `json:"model"`      // LLM model used
-	Provider  string `json:"provider"`   // LLM provider (ollama, openai, etc.)
-	RagUsed   bool   `json:"rag_used"`   // Whether RAG context was used
-	KB        string `json:"kb"`         // Knowledge base name (empty if no RAG)
-	LatencyMs int64  `json:"latency_ms"` // Request latency in milliseconds
-}
-
-// Chat handles assistant chat requests
+// Chat handles assistant chat requests with streaming response (NDJSON)
 // POST /api/assistants/:name/chat
 func (h *AssistantsHandler) Chat(c *gin.Context) {
 	assistantName := c.Param("name")
@@ -77,10 +59,7 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 		req.KnowledgeBase = req.Assistant
 	}
 
-	// Record start time for latency measurement
-	startTime := time.Now()
-
-	log.Printf("[AssistantsHandler] Chat request - Assistant: %s, KB: %s", req.Assistant, req.KnowledgeBase)
+	log.Printf("[AssistantsHandler] Chat stream request - Assistant: %s, KB: %s", req.Assistant, req.KnowledgeBase)
 
 	// Prepare input for Python runner
 	input := map[string]interface{}{
@@ -91,7 +70,6 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		log.Printf("[AssistantsHandler] Error marshaling input: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"error":   "Failed to prepare request",
@@ -99,167 +77,82 @@ func (h *AssistantsHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// Create context with timeout (5 minutes for LLM calls)
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Minute)
 	defer cancel()
 
 	// Build Python command
 	runnerPath := filepath.Join(h.projectRoot, "backend", "assistants", "runner.py")
 	cmd := exec.CommandContext(ctx, "python3", runnerPath, "--input", string(inputJSON))
-
-	// Set working directory
 	cmd.Dir = filepath.Join(h.projectRoot, "backend")
-
-	// Set environment variables for LLM Router
-	// All LLM calls go through the centralized router
 	cmd.Env = append(os.Environ(),
-		// LLM Router Configuration (AUTHORITATIVE)
 		"LLM_MODE="+os.Getenv("LLM_MODE"),
 		"LLM_PRIORITY="+os.Getenv("LLM_PRIORITY"),
 		"LLM_FALLBACK_ENABLED="+os.Getenv("LLM_FALLBACK_ENABLED"),
 		"LLM_LOCAL_MODEL="+os.Getenv("LLM_LOCAL_MODEL"),
 		"LLM_CLOUD_MODEL="+os.Getenv("LLM_CLOUD_MODEL"),
-
-		// Provider Configuration
 		"OLLAMA_BASE_URL="+os.Getenv("OLLAMA_BASE_URL"),
 		"OPENAI_API_KEY="+os.Getenv("OPENAI_API_KEY"),
 		"ANTHROPIC_API_KEY="+os.Getenv("ANTHROPIC_API_KEY"),
-
-		// Python Path
 		"PYTHONPATH="+filepath.Join(h.projectRoot, "backend"),
+		"PYTHONUNBUFFERED=1", // Ensure Python flushes stdout immediately
 	)
 
-	// Capture stdout and stderr separately
-	// stdout should contain ONLY JSON, stderr contains logs
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	// Run command
-	err = cmd.Run()
-
-	// Log stderr (Python logs) for debugging
-	if stderr.Len() > 0 {
-		log.Printf("[AssistantsHandler] Python runner stderr:\n%s", stderr.String())
-	}
-
+	// Get stdout pipe
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Printf("[AssistantsHandler] Python runner error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create stdout pipe"})
+		return
+	}
+
+	// Capture stderr for debugging
+	stderrReader, err := cmd.StderrPipe()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create stderr pipe"})
+		return
+	}
+
+	// Start command
+	if err := cmd.Start(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
-			"error":   fmt.Sprintf("Assistant execution failed: %v", err),
+			"error":   "Failed to start assistant",
 		})
 		return
 	}
 
-	// Parse JSON response from Python (stdout only)
-	// First parse as map to handle flexible Python response
-	var rawResponse map[string]interface{}
-	stdoutBytes := stdout.Bytes()
-	if err := json.Unmarshal(stdoutBytes, &rawResponse); err != nil {
-		log.Printf("[AssistantsHandler] Error parsing Python response: %v", err)
-		previewLen := 500
-		if len(stdoutBytes) < previewLen {
-			previewLen = len(stdoutBytes)
+	// Stream logs from stderr in background
+	go func() {
+		scanner := bufio.NewScanner(stderrReader)
+		for scanner.Scan() {
+			log.Printf("[Python Log] %s", scanner.Text())
 		}
-		log.Printf("[AssistantsHandler] Python stdout (first %d chars): %s", previewLen, string(stdoutBytes[:previewLen]))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Failed to parse assistant response",
-		})
-		return
-	}
+	}()
 
-	// Check for error in metadata
-	rawMetadata, _ := rawResponse["metadata"].(map[string]interface{})
-	if errorMsg, ok := rawMetadata["error"].(string); ok && errorMsg != "" {
-		log.Printf("[AssistantsHandler] Assistant returned error: %s", errorMsg)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   errorMsg,
-		})
-		return
-	}
+	// Set headers for streaming
+	c.Writer.Header().Set("Content-Type", "application/x-ndjson")
+	c.Writer.Header().Set("Transfer-Encoding", "chunked")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.WriteHeader(http.StatusOK)
 
-	// Extract and validate required fields
-	answer, _ := rawResponse["answer"].(string)
-	if answer == "" {
-		log.Printf("[AssistantsHandler] Assistant returned empty answer")
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"error":   "Assistant returned empty answer",
-		})
-		return
-	}
-
-	assistant, _ := rawResponse["assistant"].(string)
-	if assistant == "" {
-		assistant = req.Assistant
-	}
-
-	// Ensure citations is always an array (never null)
-	var citations []string
-	if rawCitations, ok := rawResponse["citations"].([]interface{}); ok {
-		citations = make([]string, 0, len(rawCitations))
-		for _, cit := range rawCitations {
-			if str, ok := cit.(string); ok {
-				citations = append(citations, str)
+	// Stream stdout line by line
+	reader := bufio.NewReader(stdout)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > 0 {
+			c.Writer.Write(line)
+			c.Writer.Flush()
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("Error reading stream: %v", err)
 			}
+			break
 		}
 	}
-	if citations == nil {
-		citations = []string{}
+
+	// Wait for command to finish
+	if err := cmd.Wait(); err != nil {
+		log.Printf("[AssistantsHandler] Python runner error: %v", err)
 	}
-
-	// Calculate latency
-	latencyMs := time.Since(startTime).Milliseconds()
-
-	// Build normalized metadata
-	normalizedMetadata := ChatMetadata{
-		Model:     getStringFromMap(rawMetadata, "model", ""),
-		Provider:  getStringFromMap(rawMetadata, "provider", "ollama"),
-		RagUsed:   getBoolFromMap(rawMetadata, "rag_used", false),
-		KB:        req.KnowledgeBase,
-		LatencyMs: latencyMs,
-	}
-
-	// Build final response with locked contract
-	response := ChatResponse{
-		Assistant: assistant,
-		Answer:    answer,
-		Citations: citations,
-		Metadata:  normalizedMetadata,
-	}
-
-	// Log observability metrics
-	log.Printf("[AssistantsHandler] ✅ Assistant: %s, KB: %s, RAG: %v, Latency: %dms, Answer length: %d chars, Citations: %d",
-		response.Assistant,
-		normalizedMetadata.KB,
-		normalizedMetadata.RagUsed,
-		normalizedMetadata.LatencyMs,
-		len(response.Answer),
-		len(response.Citations),
-	)
-
-	// Return successful response
-	c.JSON(http.StatusOK, response)
-}
-
-// Helper functions for metadata extraction
-func getStringFromMap(m map[string]interface{}, key string, defaultValue string) string {
-	if val, ok := m[key]; ok {
-		if str, ok := val.(string); ok {
-			return str
-		}
-	}
-	return defaultValue
-}
-
-func getBoolFromMap(m map[string]interface{}, key string, defaultValue bool) bool {
-	if val, ok := m[key]; ok {
-		if b, ok := val.(bool); ok {
-			return b
-		}
-	}
-	return defaultValue
 }

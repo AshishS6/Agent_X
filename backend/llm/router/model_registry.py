@@ -164,6 +164,17 @@ class ModelRegistry:
         # Pricing as of 2024 (update as needed)
         
         self._register_model(ModelInfo(
+            id="openai:gpt-5.2",
+            provider=Provider.OPENAI,
+            name="GPT-5.2",
+            context_limit=200000,
+            input_price_per_1k=0.05,
+            output_price_per_1k=0.15,
+            recommended_intents=[Intent.ANALYSIS, Intent.REASONING, Intent.LONG_FORM, Intent.CHAT, Intent.CODE],
+            is_local=False
+        ))
+        
+        self._register_model(ModelInfo(
             id="openai:gpt-4-turbo-preview",
             provider=Provider.OPENAI,
             name="GPT-4 Turbo",

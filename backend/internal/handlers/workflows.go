@@ -795,7 +795,16 @@ func (h *WorkflowsHandler) executeAgentTaskStep(run *models.WorkflowRun, stepInd
 
 	priority := "medium"
 	if p, ok := input["priority"].(string); ok && p != "" {
-		priority = p
+		// Normalize priority to satisfy DB constraint (high, medium, low) and VARCHAR(10) limit
+		// This also prevents errors when template resolution fails (e.g. "{{priority}}")
+		switch strings.ToLower(p) {
+		case "high", "urgent", "critical", "3", "4":
+			priority = "high"
+		case "low", "1":
+			priority = "low"
+		case "medium", "normal", "2":
+			priority = "medium"
+		}
 	}
 
 	// Always write step output (even on failure). Retry once on execution failure.

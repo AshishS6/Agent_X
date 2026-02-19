@@ -18,7 +18,7 @@ import os
 import time
 import logging
 import re
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List, Union, AsyncIterator
 from enum import Enum
 
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
@@ -517,6 +517,120 @@ class LLMRouter:
             )
             raise
     
+    async def stream_completion(
+        self,
+        caller: str,
+        prompt: str,
+        model_preference: Optional[str] = None,
+        intent: Optional[Intent] = None,
+        **kwargs
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Stream completion chunks.
+        
+        Yields:
+            Dict with type: "meta" | "chunk" | "usage"
+        """
+        start_time = time.time()
+        
+        # Select provider and model
+        provider, model_id, fallback_used, fallback_reason = self._select_provider(
+            caller=caller,
+            intent=intent,
+            model_preference=model_preference
+        )
+        
+        # Get model info
+        model_info = self.registry.get_model(model_id)
+        if not model_info:
+            raise ValueError(f"Model {model_id} not found in registry")
+            
+        # Yield metadata first
+        yield {
+            "type": "control",
+            "event": "metadata",
+            "data": {
+                "provider": provider.value,
+                "model_id": model_id,
+                "fallback_used": fallback_used,
+                "fallback_reason": fallback_reason
+            }
+        }
+        
+        accumulated_text = ""
+        
+        try:
+            stream_gen = None
+            if provider == Provider.OLLAMA:
+                stream_gen = self._stream_ollama(model_id, prompt, **kwargs)
+            elif provider == Provider.OPENAI:
+                stream_gen = self._stream_openai(model_id, prompt, **kwargs)
+            elif provider == Provider.ANTHROPIC:
+                stream_gen = self._stream_anthropic(model_id, prompt, **kwargs)
+            else:
+                raise ValueError(f"Unsupported provider: {provider}")
+            
+            async for chunk_text in stream_gen:
+                if chunk_text:
+                    accumulated_text += chunk_text
+                    yield {
+                        "type": "content",
+                        "content": chunk_text
+                    }
+            
+            # Calculate metrics
+            latency_ms = (time.time() - start_time) * 1000
+            input_tokens = self._estimate_tokens(prompt)
+            output_tokens = self._estimate_tokens(accumulated_text)
+            
+            # Record usage
+            self.tracker.record_usage(
+                caller=caller,
+                provider=provider.value,
+                model_id=model_id,
+                intent=(intent or Intent.CHAT).value,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                success=True,
+                fallback_used=fallback_used,
+                fallback_reason=fallback_reason
+            )
+            
+            # Yield usage
+            yield {
+                "type": "control",
+                "event": "usage",
+                "data": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "latency_ms": latency_ms,
+                    "cost": 0.0 # TODO: Calculate cost
+                }
+            }
+            
+        except Exception as e:
+            latency_ms = (time.time() - start_time) * 1000
+            self.tracker.record_usage(
+                caller=caller,
+                provider=provider.value,
+                model_id=model_id,
+                intent=(intent or Intent.CHAT).value,
+                input_tokens=0,
+                output_tokens=0,
+                latency_ms=latency_ms,
+                success=False,
+                error=str(e),
+                fallback_used=fallback_used,
+                fallback_reason=fallback_reason
+            )
+            # Yield error
+            yield {
+                "type": "error",
+                "error": str(e)
+            }
+            raise
+    
     def _select_provider(
         self,
         caller: str,
@@ -802,6 +916,58 @@ class LLMRouter:
         messages = [HumanMessage(content=prompt)]
         response = client.invoke(messages)
         return response.content
+
+    async def _stream_ollama(self, model_id: str, prompt: str, **kwargs) -> AsyncIterator[str]:
+        """Stream using Ollama"""
+        import json
+        model_name = model_id.split(":", 1)[1] if ":" in model_id else model_id
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        client = OllamaClient(base_url=base_url)
+        try:
+            async for line in await client.generate(
+                model=model_name,
+                prompt=prompt,
+                stream=True
+            ):
+                if not line: continue
+                try:
+                    data = json.loads(line)
+                    if "response" in data:
+                        yield data["response"]
+                except Exception:
+                    pass
+        finally:
+            await client.close()
+
+    async def _stream_openai(self, model_id: str, prompt: str, **kwargs) -> AsyncIterator[str]:
+        """Stream using OpenAI"""
+        model_name = model_id.split(":", 1)[1] if ":" in model_id else model_id
+        client = ChatOpenAI(
+            model=model_name,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            streaming=True,
+            **kwargs
+        )
+        async for chunk in client.astream(prompt):
+            if hasattr(chunk, "content"):
+                yield chunk.content
+            elif isinstance(chunk, str):
+                yield chunk
+
+    async def _stream_anthropic(self, model_id: str, prompt: str, **kwargs) -> AsyncIterator[str]:
+        """Stream using Anthropic"""
+        model_name = model_id.split(":", 1)[1] if ":" in model_id else model_id
+        client = ChatAnthropic(
+            model=model_name,
+            api_key=os.getenv("ANTHROPIC_API_KEY"),
+            streaming=True,
+            **kwargs
+        )
+        async for chunk in client.astream(prompt):
+            if hasattr(chunk, "content"):
+                yield chunk.content
+            elif isinstance(chunk, str):
+                yield chunk
     
     def _estimate_tokens(self, text: str) -> int:
         """

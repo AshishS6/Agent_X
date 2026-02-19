@@ -2,14 +2,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Loader2, Bot, User, ExternalLink, Zap, Clock, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import clsx from 'clsx';
-import axios from 'axios';
-import { AssistantResponse, AssistantRequest } from '../../types/assistants';
+// Removed axios import
+// Removed unused type imports
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   citations?: string[];
-  metadata?: AssistantResponse['metadata'];
+  metadata?: any;
 }
 
 interface AssistantChatProps {
@@ -74,41 +74,132 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
     setError(null);
 
     // Add user message
-    const userMsg: Message = { role: 'user', content: userMessage };
-    setMessages((prev) => [...prev, userMsg]);
+    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
     setLoading(true);
 
+    // Add placeholder assistant message
+    setMessages((prev) => [...prev, { role: 'assistant', content: '', citations: [], metadata: {} }]);
+
+    let assistantContent = '';
+    let assistantMetadata: any = {};
+
     try {
-      const request: AssistantRequest = {
-        message: userMessage,
-        assistant: assistantName,
-        knowledge_base: knowledgeBase,
-      };
+      const response = await fetch(`${API_URL}/assistants/${assistantName}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          assistant: assistantName,
+          knowledge_base: knowledgeBase,
+        }),
+      });
 
-      const response = await axios.post<AssistantResponse>(
-        `${API_URL}/assistants/${assistantName}/chat`,
-        request
-      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Network response was not ok');
+      }
 
-      // Add assistant response
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: response.data.answer,
-        citations: response.data.citations,
-        metadata: response.data.metadata,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep the last incomplete line
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+
+              if (data.type === 'content') {
+                assistantContent += data.content;
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastMsg = newMsgs[newMsgs.length - 1];
+                  if (lastMsg.role === 'assistant') {
+                    lastMsg.content = assistantContent;
+                  }
+                  return newMsgs;
+                });
+              } else if (data.type === 'meta') {
+                // Initial metadata (citations, etc.)
+                assistantMetadata = { ...assistantMetadata, ...data };
+
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastMsg = newMsgs[newMsgs.length - 1];
+                  if (lastMsg.role === 'assistant') {
+                    if (data.citations) lastMsg.citations = data.citations;
+                    lastMsg.metadata = { ...lastMsg.metadata, ...data };
+                  }
+                  return newMsgs;
+                });
+              } else if (data.type === 'control' && data.event === 'metadata') {
+                // LLM Provider metadata (e.g. { provider: 'openai', model_id: 'openai:gpt-4' })
+                const controlMeta = { ...data.data };
+
+                // Normalize model name (remove provider prefix if present)
+                if (controlMeta.model_id) {
+                  controlMeta.model = controlMeta.model_id.includes(':')
+                    ? controlMeta.model_id.split(':')[1]
+                    : controlMeta.model_id;
+                }
+
+                assistantMetadata = { ...assistantMetadata, ...controlMeta };
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastMsg = newMsgs[newMsgs.length - 1];
+                  if (lastMsg.role === 'assistant') {
+                    lastMsg.metadata = { ...lastMsg.metadata, ...controlMeta };
+                  }
+                  return newMsgs;
+                });
+              } else if (data.type === 'control' && data.event === 'usage') {
+                // Usage metadata (tokens, cost, latency)
+                assistantMetadata = { ...assistantMetadata, ...data.data };
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastMsg = newMsgs[newMsgs.length - 1];
+                  if (lastMsg.role === 'assistant') {
+                    lastMsg.metadata = { ...lastMsg.metadata, ...data.data };
+                  }
+                  return newMsgs;
+                });
+              } else if (data.type === 'error') {
+                throw new Error(data.error);
+              }
+            } catch (e) {
+              console.error('Error parsing JSON chunk', e);
+            }
+          }
+        }
+
+        if (done) break;
+      }
+
     } catch (err: any) {
       console.error('Chat error:', err);
-      const errorMsg = err.response?.data?.error || 'Failed to get response. Please try again.';
+      const errorMsg = err.message || 'Failed to get response. Please try again.';
       setError(errorMsg);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `Error: ${errorMsg}`,
-        },
-      ]);
+
+      // Update the last message to show error
+      setMessages((prev) => {
+        const newMsgs = [...prev];
+        const lastMsg = newMsgs[newMsgs.length - 1];
+        if (lastMsg.role === 'assistant' && !lastMsg.content) {
+          lastMsg.content = `Error: ${errorMsg}`;
+        }
+        return newMsgs;
+      });
     } finally {
       setLoading(false);
     }
@@ -204,7 +295,7 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
                           code: ({ node, className, children, ...props }: any) => {
                             const match = /language-(\w+)/.exec(className || '');
                             const isInline = !match;
-                            
+
                             if (isInline) {
                               return (
                                 <code className="bg-gray-800 px-1.5 py-0.5 rounded text-base font-mono text-blue-300" {...props}>
@@ -212,7 +303,7 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
                                 </code>
                               );
                             }
-                            
+
                             // For code blocks, return plain code element
                             // The pre component will wrap it with copy button
                             return (
@@ -228,7 +319,7 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
                             const cleanCodeText = String(codeText).replace(/\n$/, '');
                             const codeId = `code-${idx}-${Math.random().toString(36).substr(2, 9)}`;
                             const isCopied = copiedCodeId === codeId;
-                            
+
                             return (
                               <div className="relative group -mx-6 my-6">
                                 <div className="absolute top-3 right-3 z-10">
@@ -256,7 +347,8 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
                             );
                           },
                           p: ({ children }: any) => (
-                            <p className="mb-4 text-gray-200 leading-relaxed last:mb-0">{children}</p>
+                            <p className="mb-4 text-gray-200 leading-relaxed last:mb-0">{children}
+                            </p>
                           ),
                           a: ({ href, children }: any) => (
                             <a
@@ -282,10 +374,10 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
                             return (
                               <li className="text-gray-200 leading-relaxed">
                                 <span className="[&>p]:inline [&>p]:m-0 [&>p:first-child]:before:content-[''] [&>strong]:font-semibold [&>strong]:mr-2">
-                                  {React.Children.map(children, (child) => {
+                                  {React.Children.map(children, (child, i) => {
                                     if (React.isValidElement(child) && child.type === 'p') {
                                       // Convert paragraph to inline span
-                                      return <span className="inline">{child.props.children}</span>;
+                                      return <span key={i} className="inline">{(child.props as any).children}</span>;
                                     }
                                     return child;
                                   })}
@@ -341,13 +433,25 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
                           RAG Used
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-800 text-gray-400 border border-gray-700 rounded text-xs">
-                        {msg.metadata.model}
-                      </span>
-                      <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-800 text-gray-400 border border-gray-700 rounded text-xs">
-                        <Clock size={12} />
-                        {msg.metadata.latency_ms}ms
-                      </span>
+
+                      {msg.metadata.model && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-800 text-gray-400 border border-gray-700 rounded text-xs">
+                          {msg.metadata.model}
+                        </span>
+                      )}
+
+                      {msg.metadata.latency_ms > 0 && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-800 text-gray-400 border border-gray-700 rounded text-xs">
+                          <Clock size={12} />
+                          {Math.round(msg.metadata.latency_ms)}ms
+                        </span>
+                      )}
+
+                      {((msg.metadata.input_tokens || 0) + (msg.metadata.output_tokens || 0)) > 0 && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-800 text-gray-400 border border-gray-700 rounded text-xs">
+                          {(msg.metadata.input_tokens || 0) + (msg.metadata.output_tokens || 0)} tokens
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -361,10 +465,16 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
             <div className="w-10 h-10 rounded-full bg-purple-600 flex items-center justify-center flex-shrink-0">
               <Bot size={20} />
             </div>
-            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-800 flex items-center gap-2">
-              <Loader2 size={16} className="animate-spin text-gray-400" />
-              <span className="text-sm text-gray-400">Thinking...</span>
-            </div>
+            {/* 
+                Only show thinking spinner if content is empty (waiting for first token).
+                Once content starts streaming, the new message bubble appears.
+            */}
+            {messages.length > 0 && messages[messages.length - 1].role === 'assistant' && !messages[messages.length - 1].content && (
+              <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-800 flex items-center gap-2">
+                <Loader2 size={16} className="animate-spin text-gray-400" />
+                <span className="text-sm text-gray-400">Thinking...</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -386,28 +496,28 @@ const AssistantChat: React.FC<AssistantChatProps> = ({
             </div>
           )}
           <div className="relative w-full">
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={`Ask about ${title.toLowerCase()}...`}
-            disabled={loading}
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-4 pr-12 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || loading}
-            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-          </button>
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={`Ask about ${title.toLowerCase()}...`}
+              disabled={loading}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-4 pr-12 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || loading}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+            </button>
           </div>
         </div>
       </form>

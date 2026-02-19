@@ -7,7 +7,7 @@ This is a minimal CLI tool that:
 2. Calls KnowledgePipeline for RAG
 3. Builds prompt using prompt_builder
 4. Calls LLM Router for LLM response (local-first with cloud fallback)
-5. Returns structured JSON
+5. Streams structured JSON (NDJSON)
 
 Usage:
     python runner.py --input '{"message": "...", "assistant": "fintech", "knowledge_base": "fintech"}'
@@ -85,7 +85,6 @@ def _classify_fintech_query(message: str) -> Dict[str, Any]:
     # Vendor
     mentions_open = ("open money" in ql) or ("openmoney" in ql) or ("open.money" in ql)
     mentions_zwitch = ("zwitch" in ql) or ("developers.zwitch" in ql) or ("zwitch.io" in ql)
-    # Common user phrasing: "in Open" meaning Open Money (avoid false matches like open-source/openapi).
     mentions_open_platform = bool(re.search(r"\bin\s+open\b", ql)) and not bool(
         re.search(r"\b(openai|open-source|open source|openapi)\b", ql)
     )
@@ -159,17 +158,9 @@ def _classify_fintech_query(message: str) -> Dict[str, Any]:
     }
 
 
-async def run_assistant(message: str, assistant_name: str, knowledge_base: str) -> Dict[str, Any]:
+async def run_assistant(message: str, assistant_name: str, knowledge_base: str):
     """
-    Run an assistant with RAG and LLM
-    
-    Args:
-        message: User message
-        assistant_name: Name of assistant (e.g., "fintech")
-        knowledge_base: Knowledge base name (e.g., "fintech")
-    
-    Returns:
-        Dictionary with answer, citations, and metadata
+    Run an assistant with RAG and LLM, data to stdout (NDJSON).
     """
     # Load assistant config
     if assistant_name not in ASSISTANTS:
@@ -192,6 +183,7 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
         # Step 1: Get RAG context if enabled
         context_text = ""
         public_urls = []
+        cls: Dict[str, Any] = {}
         
         if config.use_rag and config.knowledge_base:
             logger.info(f"Retrieving context from knowledge base: {config.knowledge_base}")
@@ -199,7 +191,7 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
             layer = None
             boost_layers = None
             n_results = 10
-            cls: Dict[str, Any] = {}
+            
 
             if assistant_name == "fintech":
                 cls = _classify_fintech_query(message)
@@ -221,7 +213,16 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
             logger.info(f"Retrieved context length: {len(context_text)} chars, URLs: {len(public_urls)}")
         else:
             logger.info("RAG disabled for this assistant")
-        
+            
+        # Emit initial metadata
+        print(json.dumps({
+            "type": "meta",
+            "assistant": assistant_name,
+            "citations": sorted(public_urls) if public_urls else [],
+            "rag_used": config.use_rag and bool(context_text),
+            "kb": config.knowledge_base if (config.use_rag and bool(context_text)) else ""
+        }), flush=True)
+
         # Step 2: Build the user prompt body (system prompt is always applied separately)
         # Special-case: if the user asks for API sample request/response bodies, extract them
         # deterministically from retrieved context to prevent schema hallucination/reformatting.
@@ -232,32 +233,26 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
                 vendor=cls.get("vendor"),
             )
             if extracted:
-                return {
-                    "assistant": assistant_name,
-                    "answer": extracted,
-                    "citations": sorted(public_urls) if public_urls else [],
-                    "metadata": {
-                        "model": "kb_extract",
-                        "provider": "kb_extract",
-                        "rag_used": True,
-                        "kb": config.knowledge_base,
-                        "usage": {
-                            "timestamp": "",
-                            "caller": assistant_name,
-                            "provider": "kb_extract",
-                            "model_id": "kb_extract",
-                            "intent": "analysis",
-                            "input_tokens": 0,
-                            "output_tokens": 0,
-                            "estimated_cost_usd": 0.0,
-                            "latency_ms": 0.0,
-                            "success": True,
-                            "error": None,
-                            "fallback_used": False,
-                            "fallback_reason": None,
-                        },
-                    },
-                }
+                # Direct answer extraction (no LLM)
+                print(json.dumps({
+                    "type": "content",
+                    "content": extracted
+                }), flush=True)
+                
+                # Emit dummy usage for compatibility
+                print(json.dumps({
+                    "type": "control",
+                    "event": "usage",
+                    "data": {
+                         "provider": "kb_extract",
+                         "model_id": "kb_extract",
+                         "input_tokens": 0,
+                         "output_tokens": 0,
+                         "latency_ms": 0,
+                         "cost": 0
+                    }
+                }), flush=True)
+                return
 
         if config.use_rag and context_text:
             if assistant_name == "fintech":
@@ -297,47 +292,15 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str) 
         # Build full prompt (CRITICAL): system prompt must always be applied.
         full_prompt = f"{config.system_prompt}\n\n{prompt_body}"
         
-        # Generate completion through router
-        try:
-            result = await router.generate_completion(
-                caller=assistant_name,
-                prompt=full_prompt,
-                model_preference=config.model,  # Router will try to use this model
-                intent=intent
-            )
+        # Stream response
+        async for chunk in router.stream_completion(
+            caller=assistant_name,
+            prompt=full_prompt,
+            model_preference=config.model,  # Router will try to use this model
+            intent=intent
+        ):
+            print(json.dumps(chunk), flush=True)
             
-            response_text = result["text"]
-            usage = result["usage"]
-            provider = result["provider"]
-            model_id = result["model_id"]
-            
-            logger.info(
-                f"✅ LLM Response - Provider: {provider}, Model: {model_id}, "
-                f"Response length: {len(response_text)} chars, "
-                f"Tokens: {usage.get('input_tokens', 0)}+{usage.get('output_tokens', 0)}, "
-                f"Cost: ${usage.get('estimated_cost_usd', 0):.6f}, "
-                f"Latency: {usage.get('latency_ms', 0):.0f}ms"
-            )
-            
-        except Exception as e:
-            logger.error(f"LLM Router generate failed: {e}", exc_info=True)
-            raise
-        
-        # Step 4: Return structured response (LOCKED CONTRACT)
-        # This contract must match ChatResponse in Go handler
-        return {
-            "assistant": assistant_name,
-            "answer": response_text,  # Required: markdown-formatted answer
-            "citations": sorted(public_urls) if public_urls else [],  # Required: array (never null)
-            "metadata": {
-                "model": model_id.split(":", 1)[1] if ":" in model_id else model_id,  # Just model name for compatibility
-                "provider": provider,
-                "rag_used": config.use_rag and bool(context_text),
-                "kb": config.knowledge_base if (config.use_rag and bool(context_text)) else "",
-                "usage": usage  # Include usage metadata
-            }
-        }
-    
     finally:
         # Cleanup
         await embedding_client.close()
@@ -361,31 +324,17 @@ def main():
             raise ValueError("Missing required field: message")
         
         # Run assistant
-        result = asyncio.run(run_assistant(message, assistant_name, knowledge_base))
-        
-        # Output JSON to stdout (ONLY JSON, no logs)
-        # Ensure nothing else prints to stdout before this
-        json_output = json.dumps(result, indent=2)
-        print(json_output, flush=True)
+        asyncio.run(run_assistant(message, assistant_name, knowledge_base))
         sys.exit(0)
     
     except Exception as e:
         logger.error(f"Error running assistant: {e}", exc_info=True)
         error_result = {
-            "assistant": input_data.get("assistant", "unknown"),
-            "answer": f"Error: {str(e)}",  # Always provide answer (even if error)
-            "citations": [],  # Required: array (never null)
-            "metadata": {
-                "model": "",
-                "provider": "ollama",
-                "rag_used": False,
-                "kb": "",
-                "error": str(e)
-            }
+            "type": "error",
+            "error": str(e)
         }
         # Output error JSON to stdout (ONLY JSON, no logs)
-        json_output = json.dumps(error_result, indent=2)
-        print(json_output, flush=True)
+        print(json.dumps(error_result), flush=True)
         sys.exit(1)
 
 
