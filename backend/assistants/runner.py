@@ -45,7 +45,7 @@ from assistants.prompt_builder import (
 )
 
 # Import knowledge and LLM modules
-from knowledge.vector_store import ChromaDBStore, OllamaEmbeddingClient
+from knowledge.vector_store import ChromaDBStore, get_embedding_client
 from knowledge.retrieval import KnowledgePipeline
 from llm.router import LLMRouter, Intent, get_router
 
@@ -172,7 +172,7 @@ async def run_assistant(message: str, assistant_name: str, knowledge_base: str):
     logger.info(f"Running assistant: {assistant_name} with model preference: {config.model}")
     
     # Initialize components
-    embedding_client = OllamaEmbeddingClient()
+    embedding_client = get_embedding_client()
     vector_store = ChromaDBStore()
     knowledge_pipeline = KnowledgePipeline(embedding_client, vector_store)
     

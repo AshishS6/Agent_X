@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from knowledge.ingestion.chunking import process_file
-from knowledge.vector_store import ChromaDBStore, OllamaEmbeddingClient
+from knowledge.vector_store import ChromaDBStore, get_embedding_client
 
 # Configure logging
 logging.basicConfig(
@@ -139,7 +139,7 @@ async def ingest_directory(
     logger.info(f"Found {len(md_files)} markdown files to ingest")
     
     # Initialize components
-    embedding_client = OllamaEmbeddingClient()
+    embedding_client = get_embedding_client()
     vector_store = ChromaDBStore()
     
     try:

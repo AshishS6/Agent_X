@@ -829,13 +829,29 @@ class LLMRouter:
                 **kwargs
             )
         elif provider == Provider.OPENAI:
-            return ChatOpenAI(
-                model=model_name,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                api_key=os.getenv("OPENAI_API_KEY"),
-                **kwargs
+            # Newer OpenAI models (o1, o3, gpt-5.x) dropped the `max_tokens`
+            # parameter in favour of `max_completion_tokens`. langchain-openai
+            # 0.1.x doesn't have a first-class field for it, but we can pass it
+            # via model_kwargs which is forwarded verbatim to the OpenAI API.
+            _uses_completion_tokens = any(
+                model_name.startswith(p) for p in ("o1", "o3", "gpt-5")
             )
+            if _uses_completion_tokens:
+                return ChatOpenAI(
+                    model=model_name,
+                    temperature=temperature,
+                    api_key=os.getenv("OPENAI_API_KEY"),
+                    model_kwargs={"max_completion_tokens": max_tokens},
+                    **kwargs
+                )
+            else:
+                return ChatOpenAI(
+                    model=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    api_key=os.getenv("OPENAI_API_KEY"),
+                    **kwargs
+                )
         elif provider == Provider.ANTHROPIC:
             return ChatAnthropic(
                 model=model_name,
