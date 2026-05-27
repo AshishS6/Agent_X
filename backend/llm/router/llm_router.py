@@ -468,6 +468,12 @@ class LLMRouter:
                     prompt=prompt,
                     **kwargs
                 )
+            elif provider == Provider.NVIDIA:
+                response_text = await self._generate_nvidia(
+                    model_id=model_id,
+                    prompt=prompt,
+                    **kwargs
+                )
             else:
                 raise ValueError(f"Unsupported provider: {provider}")
             
@@ -567,6 +573,8 @@ class LLMRouter:
                 stream_gen = self._stream_openai(model_id, prompt, **kwargs)
             elif provider == Provider.ANTHROPIC:
                 stream_gen = self._stream_anthropic(model_id, prompt, **kwargs)
+            elif provider == Provider.NVIDIA:
+                stream_gen = self._stream_nvidia(model_id, prompt, **kwargs)
             else:
                 raise ValueError(f"Unsupported provider: {provider}")
             
@@ -701,7 +709,7 @@ class LLMRouter:
         if self.mode == LLMMode.LOCAL_ONLY:
             candidate_providers = [p for p in self.priority if p == "ollama"]
         elif self.mode == LLMMode.CLOUD_ONLY:
-            candidate_providers = [p for p in self.priority if p in ["openai", "anthropic"]]
+            candidate_providers = [p for p in self.priority if p in ["openai", "anthropic", "nvidia"]]
         else:  # LOCAL_FIRST
             candidate_providers = self.priority
         
@@ -764,7 +772,7 @@ class LLMRouter:
                         if not model_id:
                             reg = self.registry.get_default_model_for_provider(provider, intent)
                             model_id = reg.id if reg else None
-                    elif provider_name in ("openai", "anthropic"):
+                    elif provider_name in ("openai", "anthropic", "nvidia"):
                         dc = (self.default_cloud_model or "").strip()
                         if dc.startswith(f"{provider_name}:"):
                             model_id = dc
@@ -860,6 +868,19 @@ class LLMRouter:
                 api_key=os.getenv("ANTHROPIC_API_KEY"),
                 **kwargs
             )
+        elif provider == Provider.NVIDIA:
+            # NVIDIA endpoint is OpenAI-compatible — reuse ChatOpenAI with custom base_url
+            nvidia_api_key = os.getenv("NVIDIA_API_KEY")
+            if not nvidia_api_key:
+                raise ValueError("NVIDIA_API_KEY is not set in environment")
+            return ChatOpenAI(
+                model=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                api_key=nvidia_api_key,
+                base_url="https://integrate.api.nvidia.com/v1",
+                **kwargs
+            )
         else:
             raise ValueError(f"Unsupported provider: {provider}")
     
@@ -933,6 +954,24 @@ class LLMRouter:
         response = client.invoke(messages)
         return response.content
 
+    async def _generate_nvidia(self, model_id: str, prompt: str, **kwargs) -> str:
+        """Generate using NVIDIA GPU-accelerated endpoint (OpenAI-compatible)"""
+        # model_id format: "nvidia:moonshotai/kimi-k2.5"
+        # Strip only the leading 'nvidia:' prefix
+        model_name = model_id[len("nvidia:"):] if model_id.startswith("nvidia:") else model_id
+        nvidia_api_key = os.getenv("NVIDIA_API_KEY")
+        if not nvidia_api_key:
+            raise ValueError("NVIDIA_API_KEY is not set in environment")
+        client = ChatOpenAI(
+            model=model_name,
+            api_key=nvidia_api_key,
+            base_url="https://integrate.api.nvidia.com/v1",
+            **kwargs
+        )
+        messages = [HumanMessage(content=prompt)]
+        response = client.invoke(messages)
+        return response.content
+
     async def _stream_ollama(self, model_id: str, prompt: str, **kwargs) -> AsyncIterator[str]:
         """Stream using Ollama"""
         import json
@@ -976,6 +1015,25 @@ class LLMRouter:
         client = ChatAnthropic(
             model=model_name,
             api_key=os.getenv("ANTHROPIC_API_KEY"),
+            streaming=True,
+            **kwargs
+        )
+        async for chunk in client.astream(prompt):
+            if hasattr(chunk, "content"):
+                yield chunk.content
+            elif isinstance(chunk, str):
+                yield chunk
+
+    async def _stream_nvidia(self, model_id: str, prompt: str, **kwargs) -> AsyncIterator[str]:
+        """Stream using NVIDIA GPU-accelerated endpoint (OpenAI-compatible)"""
+        model_name = model_id[len("nvidia:"):] if model_id.startswith("nvidia:") else model_id
+        nvidia_api_key = os.getenv("NVIDIA_API_KEY")
+        if not nvidia_api_key:
+            raise ValueError("NVIDIA_API_KEY is not set in environment")
+        client = ChatOpenAI(
+            model=model_name,
+            api_key=nvidia_api_key,
+            base_url="https://integrate.api.nvidia.com/v1",
             streaming=True,
             **kwargs
         )

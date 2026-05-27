@@ -88,10 +88,21 @@ class HealthChecker:
     def check_anthropic_key(self) -> ProviderStatus:
         """
         Check if Anthropic API key is configured
-        
+
         Note: This is a basic check (key presence), not validity
         """
         api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            return ProviderStatus.UNHEALTHY
+        return ProviderStatus.HEALTHY
+
+    def check_nvidia_key(self) -> ProviderStatus:
+        """
+        Check if NVIDIA API key is configured
+
+        Note: This is a basic check (key presence), not validity
+        """
+        api_key = os.getenv("NVIDIA_API_KEY", "")
         if not api_key:
             return ProviderStatus.UNHEALTHY
         return ProviderStatus.HEALTHY
@@ -117,6 +128,8 @@ class HealthChecker:
             return self.check_openai_key()
         elif provider_lower == "anthropic":
             return self.check_anthropic_key()
+        elif provider_lower == "nvidia":
+            return self.check_nvidia_key()
         else:
             return ProviderStatus.UNKNOWN
     
@@ -139,6 +152,8 @@ class HealthChecker:
             return self.check_openai_key()
         elif provider_lower == "anthropic":
             return self.check_anthropic_key()
+        elif provider_lower == "nvidia":
+            return self.check_nvidia_key()
         else:
             return ProviderStatus.UNKNOWN
     

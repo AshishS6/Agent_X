@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -263,6 +264,12 @@ func (h *BlogDocumentsHandler) GenerateOutline(c *gin.Context) {
 			h.taskRepo.UpdateFailed(task.ID, result.Error)
 		} else {
 			h.taskRepo.UpdateCompleted(task.ID, result.Output)
+
+			// Save outline to DB from Go (Python subprocess may not have DB access).
+			// The Python agent returns the outline structure in result.Output["response"]["structure"].
+			if err := h.saveOutlineFromResult(result.Output, documentID, nextVersion); err != nil {
+				log.Printf("[BlogDocumentsHandler] Failed to save outline to DB: %v", err)
+			}
 		}
 	}()
 
@@ -271,6 +278,40 @@ func (h *BlogDocumentsHandler) GenerateOutline(c *gin.Context) {
 		"data":    task,
 		"message": "Outline generation started",
 	})
+}
+
+// saveOutlineFromResult parses the executor output and saves the outline structure to the DB.
+// The Python agent returns: {"response": {"structure": {"title": "...", "outline": [...]}}}
+// This runs in Go so it always has DB access, unlike the Python subprocess.
+func (h *BlogDocumentsHandler) saveOutlineFromResult(output map[string]any, documentID string, version int) error {
+	if output == nil {
+		return fmt.Errorf("output is nil")
+	}
+
+	// Navigate output["response"]["structure"]
+	response, ok := output["response"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("output.response is missing or not an object")
+	}
+
+	structure, ok := response["structure"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("output.response.structure is missing or not an object")
+	}
+
+	// Marshal structure back to JSON for storage
+	structureJSON, err := json.Marshal(structure)
+	if err != nil {
+		return fmt.Errorf("failed to marshal structure: %w", err)
+	}
+
+	_, err = h.docRepo.CreateOutlineVersion(documentID, version, structureJSON, models.BlogVersionStatusDraft)
+	if err != nil {
+		return fmt.Errorf("failed to create outline version: %w", err)
+	}
+
+	log.Printf("[BlogDocumentsHandler] Saved outline version %d for document %s", version, documentID)
+	return nil
 }
 
 // UpdateOutlineStatusRequest is the request body for updating outline status
@@ -541,6 +582,11 @@ func (h *BlogDocumentsHandler) GenerateDraft(c *gin.Context) {
 			h.taskRepo.UpdateFailed(task.ID, result.Error)
 		} else {
 			h.taskRepo.UpdateCompleted(task.ID, result.Output)
+
+			// Save draft to DB from Go (Python subprocess may not have DB access).
+			if err := h.saveDraftFromResult(result.Output, documentID, &approvedOutline.ID, nextVersion); err != nil {
+				log.Printf("[BlogDocumentsHandler] Failed to save draft to DB: %v", err)
+			}
 		}
 	}()
 
@@ -549,4 +595,37 @@ func (h *BlogDocumentsHandler) GenerateDraft(c *gin.Context) {
 		"data":    task,
 		"message": "Draft generation started",
 	})
+}
+
+// saveDraftFromResult parses the executor output and saves the draft to the DB.
+func (h *BlogDocumentsHandler) saveDraftFromResult(output map[string]any, documentID string, outlineVersionID *string, version int) error {
+	if output == nil {
+		return fmt.Errorf("output is nil")
+	}
+
+	response, ok := output["response"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("output.response is missing or not an object")
+	}
+
+	content, _ := response["content"].(string)
+	metaDescription, _ := response["meta_description"].(string)
+
+	var wordCount, readingTime *int
+	if wc, ok := response["word_count"].(float64); ok {
+		val := int(wc)
+		wordCount = &val
+	}
+	if rt, ok := response["estimated_reading_time"].(float64); ok {
+		val := int(rt)
+		readingTime = &val
+	}
+
+	_, err := h.docRepo.CreateDraftVersion(documentID, outlineVersionID, version, content, metaDescription, wordCount, readingTime, models.BlogVersionStatusDraft)
+	if err != nil {
+		return fmt.Errorf("failed to create draft version: %w", err)
+	}
+
+	log.Printf("[BlogDocumentsHandler] Saved draft version %d for document %s", version, documentID)
+	return nil
 }

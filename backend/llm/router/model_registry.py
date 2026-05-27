@@ -21,6 +21,7 @@ class Provider(str, Enum):
     OLLAMA = "ollama"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
+    NVIDIA = "nvidia"
 
 
 class Intent(str, Enum):
@@ -207,6 +208,23 @@ class ModelRegistry:
             is_local=False
         ))
         
+        # ===== CLOUD MODELS (NVIDIA) =====
+        # Access via NVIDIA GPU-accelerated endpoints (OpenAI-compatible API)
+
+        self._register_model(ModelInfo(
+            id="nvidia:moonshotai/kimi-k2.5",
+            provider=Provider.NVIDIA,
+            name="Kimi K2.5 (NVIDIA)",
+            context_limit=131072,
+            input_price_per_1k=0.0,   # free-tier trial via NVIDIA Developer Program
+            output_price_per_1k=0.0,
+            recommended_intents=[
+                Intent.CHAT, Intent.CODE, Intent.ANALYSIS,
+                Intent.REASONING, Intent.LONG_FORM
+            ],
+            is_local=False
+        ))
+
         # ===== CLOUD MODELS (Anthropic) =====
         
         self._register_model(ModelInfo(
