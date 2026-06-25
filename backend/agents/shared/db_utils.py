@@ -67,6 +67,16 @@ def _get_connection_pool():
                     else:
                         # Default to disable SSL for local connections to avoid GSSAPI issues
                         pool_config['sslmode'] = 'disable'
+
+                    # Disable GSSAPI encryption negotiation. On macOS/libpq builds with
+                    # GSSAPI support, the default gssencmode=prefer attempts a Kerberos
+                    # handshake that hangs for ~120s ("could not initiate GSSAPI security
+                    # context ... no default realm") before falling back, which trips the
+                    # connection timeout. Disable unless explicitly overridden in the URL.
+                    if 'gssencmode' in parsed.query:
+                        pool_config['gssencmode'] = parsed.query.split('gssencmode=')[1].split('&')[0]
+                    else:
+                        pool_config['gssencmode'] = 'disable'
                     
                     logger.info(f"[DB_POOL] Initializing connection pool: minconn=0 (lazy), maxconn=10, host={pool_config['host']}, connect_timeout=5s")
                     
@@ -79,7 +89,7 @@ def _get_connection_pool():
                         user=pool_config['user'],
                         password=pool_config['password'],
                         connect_timeout=5,  # Fail fast in office networks
-                        **({k: v for k, v in pool_config.items() if k in ['sslmode']})
+                        **({k: v for k, v in pool_config.items() if k in ['sslmode', 'gssencmode']})
                     )
                     # Note: With minconn=0, connections are created lazily on first use, not during pool initialization
                     # This prevents blocking during pool creation if database is unavailable
